@@ -9,5 +9,7 @@ firebase-admin
 djangorestframework-simplejwt
 google-cloud-texttospeech 
 pyrebase4
+django-cors-headers
+
 
 

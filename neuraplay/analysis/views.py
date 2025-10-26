@@ -6,7 +6,8 @@ from google.cloud import texttospeech
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 
-from neuraplay_ai.services.gemini_service import analyze_lol_strategy, analyze_fifa_strategy
+from neuraplay_ai.services.gemini_service import analyze_lol_strategy, analyze_fifa_strategy, \
+analyze_fifa_voice_input, analyze_lol_voice_input
 from neuraplay_ai.services.firestore_service import save_fifa_analysis, save_lol_analysis
 
 # ----------------------
@@ -38,63 +39,174 @@ def synthesize_speech(text: str):
 # ----------------------
 # Analyze LoL from voice
 # ----------------------
-@api_view(['POST'])
-def analyze_lol_voice(request):
-    id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user_id = verify_firebase_token(id_token)
-    if not user_id:
-        return Response({"error": "Unauthorized"}, status=401)
+# @api_view(['POST'])
+# def analyze_lol_voice(request):
+#     id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+#     user_id = verify_firebase_token(id_token)
+#     if not user_id:
+#         return Response({"error": "Unauthorized"}, status=401)
 
-    text = request.data.get("stats")
-    if not text:
-        return Response({"error": "No text provided"}, status=400)
+#     text = request.data.get("stats")
+#     if not text:
+#         return Response({"error": "No text provided"}, status=400)
 
-    try:
-        result = analyze_lol_strategy({"text": text})
+#     try:
+#         result = analyze_lol_strategy({"text": text})
         
-        # Save to Firestore (non-blocking)
-        try:
-            save_lol_analysis({"user_id": user_id, "text": text}, result)
-        except Exception as e:
-            print(f"Failed to save LoL analysis: {e}")
+#         # Save to Firestore (non-blocking)
+#         try:
+#             save_lol_analysis({"user_id": user_id, "text": text}, result)
+#         except Exception as e:
+#             print(f"Failed to save LoL analysis: {e}")
 
-        # Convert result to speech
-        audio_content = synthesize_speech(result.get("recommendation", "No recommendation"))
+#         # Convert result to speech
+#         audio_content = synthesize_speech(result.get("recommendation", "No recommendation"))
 
-        return Response({"audio": audio_content})
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
+#         return Response({"audio": audio_content})
+#     except Exception as e:
+#         return Response({"error": str(e)}, status=500)
 
 # ----------------------
 # Analyze FIFA from voice
 # ----------------------
+
+# @api_view(['POST'])
+# def analyze_fifa_voice(request):
+#     id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+#     user_id = verify_firebase_token(id_token)
+
+#     if not user_id:
+#         return Response({"error": "Unauthorized"}, status=401)
+
+#     text = request.data.get("stats")
+#     if not text:
+#         return Response({"error": "No text provided"}, status=400)
+
+#     try:
+#         result = analyze_fifa_strategy({"text": text})
+#         print("✅ FIFA Analysis Result:", result)
+
+#         response_data = {
+#             "summary": result.get("explanation", "No summary"),
+#             "topTips": result.get("top_tips", []),
+#             "trainingDrills": result.get("drills", []),
+#             "rating": result.get("rating", None),
+#             "confidence": result.get("estimated_score", None),
+#         }
+
+#         # Save in Firestore
+#         try:
+#             save_fifa_analysis({"user_id": user_id, "text": text}, response_data)
+#         except Exception as e:
+#             print("⚠️ Firestore Save Error:", e)
+
+#         return Response(response_data)
+
+#     except Exception as e:
+#         print("❌ FIFA Strategy Error:", e)
+#         return Response({"error": str(e)}, status=500)
+
+
+# @api_view(['POST'])
+# def analyze_fifa_voice(request):
+#     id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+#     user_id = verify_firebase_token(id_token)
+#     if not user_id:
+#         return Response({"error": "Unauthorized"}, status=401)
+
+#     text = request.data.get("stats")
+#     if not text:
+#         return Response({"error": "No text provided"}, status=400)
+
+#     try:
+#         result = analyze_fifa_strategy({"text": text})
+        
+#         # Save to Firestore (non-blocking)
+#         try:
+#             save_fifa_analysis({"user_id": user_id, "text": text}, result)
+#         except Exception as e:
+#             print(f"Failed to save FIFA analysis: {e}")
+
+#         # Convert result to speech
+#         audio_content = synthesize_speech(result.get("recommendation", "No recommendation"))
+
+#         return Response({"audio": audio_content})
+#     except Exception as e:
+#         return Response({"error": str(e)}, status=500)
+
 @api_view(['POST'])
 def analyze_fifa_voice(request):
     id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user_id = verify_firebase_token(id_token)
+
     if not user_id:
         return Response({"error": "Unauthorized"}, status=401)
 
-    text = request.data.get("stats")
-    if not text:
+    user_text = request.data.get("stats")  # This is the free-form text from voice
+    if not user_text:
         return Response({"error": "No text provided"}, status=400)
 
     try:
-        result = analyze_fifa_strategy({"text": text})
-        
-        # Save to Firestore (non-blocking)
+        # Use the new voice analysis function instead of the structured one
+        result = analyze_fifa_voice_input(user_text)
+        print("✅ FIFA Voice Analysis Result:", result)
+
+        response_data = {
+            "summary": result.get("explanation", "No summary"),
+            "topTips": result.get("top_tips", []),
+            "trainingDrills": result.get("drills", []),
+            "rating": result.get("rating", None),
+            "confidence": result.get("estimated_score", None),
+        }
+
+        # Save in Firestore
         try:
-            save_fifa_analysis({"user_id": user_id, "text": text}, result)
+            save_fifa_analysis({"user_id": user_id, "text": user_text}, response_data)
         except Exception as e:
-            print(f"Failed to save FIFA analysis: {e}")
+            print("⚠️ Firestore Save Error:", e)
 
-        # Convert result to speech
-        audio_content = synthesize_speech(result.get("recommendation", "No recommendation"))
+        return Response(response_data)
 
-        return Response({"audio": audio_content})
     except Exception as e:
+        print("❌ FIFA Voice Analysis Error:", e)
         return Response({"error": str(e)}, status=500)
 
+@api_view(['POST']) 
+def analyze_lol_voice(request):
+    id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user_id = verify_firebase_token(id_token)
+
+    if not user_id:
+        return Response({"error": "Unauthorized"}, status=401)
+
+    user_text = request.data.get("stats")
+    if not user_text:
+        return Response({"error": "No text provided"}, status=400)
+
+    try:
+        # Use the new voice analysis function for LoL
+        result = analyze_lol_voice_input(user_text)
+        print("✅ LoL Voice Analysis Result:", result)
+
+        response_data = {
+            "summary": result.get("explanation", "No summary"),
+            "topTips": result.get("top_tips", []),
+            "trainingDrills": result.get("drills", []),
+            "rating": result.get("rating", None),
+            "confidence": result.get("estimated_score", None),
+        }
+
+        # Save in Firestore
+        try:
+            save_lol_analysis({"user_id": user_id, "text": user_text}, response_data)
+        except Exception as e:
+            print("⚠️ Firestore Save Error:", e)
+
+        return Response(response_data)
+
+    except Exception as e:
+        print("❌ LoL Voice Analysis Error:", e)
+        return Response({"error": str(e)}, status=500)
 
 
 
@@ -196,3 +308,5 @@ def analyze_fifa_voice(request):
 #         return Response(response)
 #     except Exception as e:
 #         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
