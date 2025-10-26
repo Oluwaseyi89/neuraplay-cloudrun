@@ -16,7 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from analysis.views import analyze_lol, analyze_fifa
+# from analysis.views import analyze_lol, analyze_fifa
 
 
 urlpatterns = [
