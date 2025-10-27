@@ -268,11 +268,101 @@ def generate_coaching_advice(gameplay: str, game_type: str) -> Dict[str, Any]:
             "raw_text": ""
         }
 
+# def analyze_fifa_voice_input(user_text: str) -> Dict[str, Any]:
+#     """
+#     Analyze free-form FIFA voice input and extract structured insights
+#     """
+#     prompt = f"""
+# You are an expert FIFA/EA FC analyst. A player is describing their gameplay issues in natural language.
+
+# Player's description: "{user_text}"
+
+# FIRST, extract the key gameplay elements mentioned:
+# - Team and formation (if mentioned)
+# - Current scoreline or match situation  
+# - Possession and control issues
+# - Defensive problems (conceding goals, defensive errors)
+# - Attacking problems (scoring chances, finishing)
+# - Specific events or patterns mentioned
+
+# SECOND, provide coaching advice based on the extracted context:
+# - 3 immediate tactical adjustments
+# - 2 specific practice drills to address the issues
+# - Performance rating (0-100%) based on described problems
+
+# Keep the analysis focused on the specific issues mentioned in the player's description.
+# Return your analysis in a structured format.
+# """
+    
+#     try:
+#         text = _call_gemini(prompt)
+#         structured = _parse_insights_to_structured(text)
+#         structured["meta"] = {"game": "fifa", "input_type": "voice", "user_text": user_text}
+#         return structured
+#     except Exception as e:
+#         return {
+#             "error": f"Voice analysis failed: {str(e)}",
+#             "top_tips": [],
+#             "drills": [],
+#             "explanation": "",
+#             "estimated_score": 0.5,
+#             "rating": 5.0,
+#             "raw_text": "",
+#             "meta": {"game": "fifa", "input_type": "voice"}
+#         }
+
+# def analyze_lol_voice_input(user_text: str) -> Dict[str, Any]:
+#     """
+#     Analyze free-form League of Legends voice input and extract structured insights
+#     """
+#     prompt = f"""
+# You are an expert League of Legends coach. A player is describing their gameplay issues in natural language.
+
+# Player's description: "{user_text}"
+
+# FIRST, extract the key gameplay elements mentioned:
+# - Champion and role (if mentioned)
+# - Lane phase issues (CS, trading, positioning)
+# - Team fight problems (positioning, target selection)
+# - Objective control (dragons, barons, towers)
+# - Specific match situations described
+
+# SECOND, provide coaching advice based on the extracted context:
+# - 3 immediate in-game actions
+# - 2 specific practice drills to address the issues  
+# - Performance rating (0-100%) based on described problems
+
+# Focus on the specific pain points mentioned by the player.
+# Return your analysis in a structured format.
+# """
+    
+#     try:
+#         text = _call_gemini(prompt)
+#         structured = _parse_insights_to_structured(text)
+#         structured["meta"] = {"game": "league_of_legends", "input_type": "voice", "user_text": user_text}
+#         return structured
+#     except Exception as e:
+#         return {
+#             "error": f"Voice analysis failed: {str(e)}",
+#             "top_tips": [],
+#             "drills": [],
+#             "explanation": "",
+#             "estimated_score": 0.5,
+#             "rating": 5.0,
+#             "raw_text": "",
+#             "meta": {"game": "league_of_legends", "input_type": "voice"}
+#         }
+
+
 def analyze_fifa_voice_input(user_text: str) -> Dict[str, Any]:
     """
     Analyze free-form FIFA voice input and extract structured insights
     """
-    prompt = f"""
+    # Check if user wants detailed analysis
+    wants_detailed = "detailed" in user_text.lower()
+    
+    if wants_detailed:
+        prompt = f"""
 You are an expert FIFA/EA FC analyst. A player is describing their gameplay issues in natural language.
 
 Player's description: "{user_text}"
@@ -285,7 +375,7 @@ FIRST, extract the key gameplay elements mentioned:
 - Attacking problems (scoring chances, finishing)
 - Specific events or patterns mentioned
 
-SECOND, provide coaching advice based on the extracted context:
+SECOND, provide detailed coaching advice based on the extracted context:
 - 3 immediate tactical adjustments
 - 2 specific practice drills to address the issues
 - Performance rating (0-100%) based on described problems
@@ -293,12 +383,45 @@ SECOND, provide coaching advice based on the extracted context:
 Keep the analysis focused on the specific issues mentioned in the player's description.
 Return your analysis in a structured format.
 """
+    else:
+        prompt = f"""
+You are an expert FIFA/EA FC analyst. A player is describing their gameplay issues.
+
+Player's description: "{user_text}"
+
+Provide exactly 3 concise sentences of coaching advice:
+1. Identify the main issue from their description
+2. Suggest one immediate tactical adjustment  
+3. Recommend one quick practice tip
+
+Keep it very brief and focused - maximum 3 sentences total.
+Do not include bullet points, lists, or ratings.
+"""
     
     try:
         text = _call_gemini(prompt)
-        structured = _parse_insights_to_structured(text)
-        structured["meta"] = {"game": "fifa", "input_type": "voice", "user_text": user_text}
-        return structured
+        
+        if wants_detailed:
+            # Use the existing structured parser for detailed responses
+            structured = _parse_insights_to_structured(text)
+            structured["meta"] = {"game": "fifa", "input_type": "voice", "user_text": user_text, "response_type": "detailed"}
+            return structured
+        else:
+            # For simple responses, create a minimal structured response
+            # Clean up the response to ensure it's exactly 3 sentences
+            sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+            simple_summary = ' '.join(sentences[:3])  # Take first 3 sentences
+            
+            return {
+                "top_tips": [],
+                "drills": [],
+                "explanation": simple_summary,
+                "estimated_score": None,  # No score for simple responses
+                "rating": None,  # No rating for simple responses
+                "raw_text": text,
+                "meta": {"game": "fifa", "input_type": "voice", "user_text": user_text, "response_type": "simple"}
+            }
+            
     except Exception as e:
         return {
             "error": f"Voice analysis failed: {str(e)}",
@@ -315,7 +438,11 @@ def analyze_lol_voice_input(user_text: str) -> Dict[str, Any]:
     """
     Analyze free-form League of Legends voice input and extract structured insights
     """
-    prompt = f"""
+    # Check if user wants detailed analysis
+    wants_detailed = "detailed" in user_text.lower()
+    
+    if wants_detailed:
+        prompt = f"""
 You are an expert League of Legends coach. A player is describing their gameplay issues in natural language.
 
 Player's description: "{user_text}"
@@ -327,7 +454,7 @@ FIRST, extract the key gameplay elements mentioned:
 - Objective control (dragons, barons, towers)
 - Specific match situations described
 
-SECOND, provide coaching advice based on the extracted context:
+SECOND, provide detailed coaching advice based on the extracted context:
 - 3 immediate in-game actions
 - 2 specific practice drills to address the issues  
 - Performance rating (0-100%) based on described problems
@@ -335,12 +462,44 @@ SECOND, provide coaching advice based on the extracted context:
 Focus on the specific pain points mentioned by the player.
 Return your analysis in a structured format.
 """
+    else:
+        prompt = f"""
+You are an expert League of Legends coach. A player is describing their gameplay issues.
+
+Player's description: "{user_text}"
+
+Provide exactly 3 concise sentences of coaching advice:
+1. Identify the main issue from their description
+2. Suggest one immediate in-game action  
+3. Recommend one quick improvement tip
+
+Keep it very brief and focused - maximum 3 sentences total.
+Do not include bullet points, lists, or ratings.
+"""
     
     try:
         text = _call_gemini(prompt)
-        structured = _parse_insights_to_structured(text)
-        structured["meta"] = {"game": "league_of_legends", "input_type": "voice", "user_text": user_text}
-        return structured
+        
+        if wants_detailed:
+            # Use the existing structured parser for detailed responses
+            structured = _parse_insights_to_structured(text)
+            structured["meta"] = {"game": "league_of_legends", "input_type": "voice", "user_text": user_text, "response_type": "detailed"}
+            return structured
+        else:
+            # For simple responses, create a minimal structured response
+            sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+            simple_summary = ' '.join(sentences[:3])  # Take first 3 sentences
+            
+            return {
+                "top_tips": [],
+                "drills": [],
+                "explanation": simple_summary,
+                "estimated_score": None,  # No score for simple responses
+                "rating": None,  # No rating for simple responses
+                "raw_text": text,
+                "meta": {"game": "league_of_legends", "input_type": "voice", "user_text": user_text, "response_type": "simple"}
+            }
+            
     except Exception as e:
         return {
             "error": f"Voice analysis failed: {str(e)}",
@@ -352,7 +511,6 @@ Return your analysis in a structured format.
             "raw_text": "",
             "meta": {"game": "league_of_legends", "input_type": "voice"}
         }
-
 
 
 

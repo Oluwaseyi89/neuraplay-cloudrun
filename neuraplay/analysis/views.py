@@ -134,6 +134,80 @@ def synthesize_speech(text: str):
 #     except Exception as e:
 #         return Response({"error": str(e)}, status=500)
 
+# @api_view(['POST'])
+# def analyze_fifa_voice(request):
+#     id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+#     user_id = verify_firebase_token(id_token)
+
+#     if not user_id:
+#         return Response({"error": "Unauthorized"}, status=401)
+
+#     user_text = request.data.get("stats")  # This is the free-form text from voice
+#     if not user_text:
+#         return Response({"error": "No text provided"}, status=400)
+
+#     try:
+#         # Use the new voice analysis function instead of the structured one
+#         result = analyze_fifa_voice_input(user_text)
+#         print("✅ FIFA Voice Analysis Result:", result)
+
+#         response_data = {
+#             "summary": result.get("explanation", "No summary"),
+#             "topTips": result.get("top_tips", []),
+#             "trainingDrills": result.get("drills", []),
+#             "rating": result.get("rating", None),
+#             "confidence": result.get("estimated_score", None),
+#         }
+
+#         # Save in Firestore
+#         try:
+#             save_fifa_analysis({"user_id": user_id, "text": user_text}, response_data)
+#         except Exception as e:
+#             print("⚠️ Firestore Save Error:", e)
+
+#         return Response(response_data)
+
+#     except Exception as e:
+#         print("❌ FIFA Voice Analysis Error:", e)
+#         return Response({"error": str(e)}, status=500)
+
+# @api_view(['POST']) 
+# def analyze_lol_voice(request):
+#     id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+#     user_id = verify_firebase_token(id_token)
+
+#     if not user_id:
+#         return Response({"error": "Unauthorized"}, status=401)
+
+#     user_text = request.data.get("stats")
+#     if not user_text:
+#         return Response({"error": "No text provided"}, status=400)
+
+#     try:
+#         # Use the new voice analysis function for LoL
+#         result = analyze_lol_voice_input(user_text)
+#         print("✅ LoL Voice Analysis Result:", result)
+
+#         response_data = {
+#             "summary": result.get("explanation", "No summary"),
+#             "topTips": result.get("top_tips", []),
+#             "trainingDrills": result.get("drills", []),
+#             "rating": result.get("rating", None),
+#             "confidence": result.get("estimated_score", None),
+#         }
+
+#         # Save in Firestore
+#         try:
+#             save_lol_analysis({"user_id": user_id, "text": user_text}, response_data)
+#         except Exception as e:
+#             print("⚠️ Firestore Save Error:", e)
+
+#         return Response(response_data)
+
+#     except Exception as e:
+#         print("❌ LoL Voice Analysis Error:", e)
+#         return Response({"error": str(e)}, status=500)
+
 @api_view(['POST'])
 def analyze_fifa_voice(request):
     id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
@@ -142,22 +216,35 @@ def analyze_fifa_voice(request):
     if not user_id:
         return Response({"error": "Unauthorized"}, status=401)
 
-    user_text = request.data.get("stats")  # This is the free-form text from voice
+    user_text = request.data.get("stats")
     if not user_text:
         return Response({"error": "No text provided"}, status=400)
 
     try:
-        # Use the new voice analysis function instead of the structured one
         result = analyze_fifa_voice_input(user_text)
         print("✅ FIFA Voice Analysis Result:", result)
 
-        response_data = {
-            "summary": result.get("explanation", "No summary"),
-            "topTips": result.get("top_tips", []),
-            "trainingDrills": result.get("drills", []),
-            "rating": result.get("rating", None),
-            "confidence": result.get("estimated_score", None),
-        }
+        # Check if it's a simple response (no rating/confidence)
+        is_simple_response = result.get("rating") is None and result.get("estimated_score") is None
+        
+        if is_simple_response:
+            response_data = {
+                "summary": result.get("explanation", "No summary"),
+                "topTips": [],  # Empty for simple responses
+                "trainingDrills": [],  # Empty for simple responses
+                "rating": None,
+                "confidence": None,
+                "responseType": "simple"  # Indicate this is a simple response
+            }
+        else:
+            response_data = {
+                "summary": result.get("explanation", "No summary"),
+                "topTips": result.get("top_tips", []),
+                "trainingDrills": result.get("drills", []),
+                "rating": result.get("rating", None),
+                "confidence": result.get("estimated_score", None),
+                "responseType": "detailed"  # Indicate this is a detailed response
+            }
 
         # Save in Firestore
         try:
@@ -184,17 +271,30 @@ def analyze_lol_voice(request):
         return Response({"error": "No text provided"}, status=400)
 
     try:
-        # Use the new voice analysis function for LoL
         result = analyze_lol_voice_input(user_text)
         print("✅ LoL Voice Analysis Result:", result)
 
-        response_data = {
-            "summary": result.get("explanation", "No summary"),
-            "topTips": result.get("top_tips", []),
-            "trainingDrills": result.get("drills", []),
-            "rating": result.get("rating", None),
-            "confidence": result.get("estimated_score", None),
-        }
+        # Check if it's a simple response (no rating/confidence)
+        is_simple_response = result.get("rating") is None and result.get("estimated_score") is None
+        
+        if is_simple_response:
+            response_data = {
+                "summary": result.get("explanation", "No summary"),
+                "topTips": [],  # Empty for simple responses
+                "trainingDrills": [],  # Empty for simple responses
+                "rating": None,
+                "confidence": None,
+                "responseType": "simple"  # Indicate this is a simple response
+            }
+        else:
+            response_data = {
+                "summary": result.get("explanation", "No summary"),
+                "topTips": result.get("top_tips", []),
+                "trainingDrills": result.get("drills", []),
+                "rating": result.get("rating", None),
+                "confidence": result.get("estimated_score", None),
+                "responseType": "detailed"  # Indicate this is a detailed response
+            }
 
         # Save in Firestore
         try:
