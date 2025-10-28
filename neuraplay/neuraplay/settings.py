@@ -26,7 +26,11 @@ SECRET_KEY = 'django-insecure-e)5s7(1v8tblgsxn3%v8a+@7l*lgc@zp65)n*ra$qvprj-b87^
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    ".run.app"
+    ]
 
 # ALLOWED_HOSTS = [
 #     "localhost",
@@ -45,7 +49,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'analysis.apps.AnalysisConfig',
-    'corsheaders'
+    'corsheaders',
+    'channels'
 ]
 
 MIDDLEWARE = [
@@ -62,6 +67,7 @@ MIDDLEWARE = [
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "https://neuraplay-app-930102180917.us-central1.run.app"
 ]
 
 CORS_ALLOW_HEADERS = [
@@ -89,6 +95,15 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'neuraplay.wsgi.application'
+
+ASGI_APPLICATION = 'neuraplay.asgi.application'
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
+}
+
 
 
 # Database

@@ -10,6 +10,11 @@ djangorestframework-simplejwt
 google-cloud-texttospeech 
 pyrebase4
 django-cors-headers
+channels 
+channels_redis
+daphne
+google-cloud-speech
+
 
 
 
