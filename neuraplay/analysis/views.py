@@ -6,6 +6,8 @@ from rest_framework import status
 from google.cloud import texttospeech
 import firebase_admin
 from firebase_admin import auth as firebase_auth
+from django.views.decorators.csrf import csrf_exempt
+
 
 from neuraplay_ai.services.gemini_service import analyze_fifa_voice_input, analyze_lol_voice_input
 from neuraplay_ai.services.firestore_service import (
@@ -199,6 +201,59 @@ def get_recent_lol_analyses(request):
     except Exception as e:
         print("❌ Error fetching recent LoL analyses:", e)
         return Response({"error": str(e)}, status=500)
+
+@api_view(['POST'])
+@csrf_exempt  # Since it's coming from extension
+def analyze_browser_stats(request):
+    """
+    Analyze game stats from browser extension
+    Reuses your existing analysis logic!
+    """
+    try:
+        game = request.data.get('game')
+        stats_data = request.data.get('stats', {})
+        
+        # Convert stats to text format for your existing analysis
+        stats_text = _format_stats_for_analysis(stats_data, game)
+        
+        # Reuse your existing analysis functions!
+        if game == 'lol':
+            result = analyze_lol_voice_input(stats_text)
+        elif game == 'fifa':
+            result = analyze_fifa_voice_input(stats_text)
+        else:
+            return Response({"error": "Unsupported game"}, status=400)
+        
+        # Reuse your response formatting
+        response_data = build_response_data(result)
+        
+        print(f"✅ Browser extension analysis completed for {game}")
+        return Response(response_data)
+        
+    except Exception as e:
+        print(f"❌ Browser analysis error: {e}")
+        return Response({"error": str(e)}, status=500)
+
+def _format_stats_for_analysis(stats, game):
+    """Format scraped stats into text for analysis"""
+    if game == 'lol':
+        return f"""
+        League of Legends Match Stats:
+        KDA: {stats.get('kda', 'N/A')}
+        CS: {stats.get('cs', 'N/A')}
+        Vision Score: {stats.get('vision', 'N/A')}
+        Damage: {stats.get('damage', 'N/A')}
+        Gold: {stats.get('gold', 'N/A')}
+        """
+    elif game == 'fifa':
+        return f"""
+        FIFA Match Stats:
+        Possession: {stats.get('possession', 'N/A')}
+        Shots: {stats.get('shots', 'N/A')}
+        Pass Accuracy: {stats.get('passes', 'N/A')}
+        Tackles: {stats.get('tackles', 'N/A')}
+        Score: {stats.get('score', 'N/A')}
+        """
 
 
 

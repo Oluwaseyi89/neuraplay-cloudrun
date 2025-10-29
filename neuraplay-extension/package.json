@@ -1,0 +1,6 @@
+{
+    "scripts": {
+      "build:extension": "mkdir -p dist/extension && cp -r extension/* dist/extension/",
+      "pack:extension": "cd dist/extension && zip -r ../neuraplay-extension.zip ."
+    }
+  }

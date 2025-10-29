@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="popup-container">
+        <div class="popup-header">
+            <h1>🎮 NeuraPlay</h1>
+            <p>AI Game Analysis</p>
+        </div>
+        
+        <div class="popup-content">
+            <div class="status" id="status">
+                <p>Scanning page for game data...</p>
+            </div>
+            
+            <div class="actions">
+                <button id="analyzeBtn" class="analyze-button">
+                    Analyze Current Page
+                </button>
+                <button id="settingsBtn" class="settings-button">
+                    Settings
+                </button>
+            </div>
+            
+            <div class="recent-analysis" id="recentAnalysis" style="display: none;">
+                <h3>Latest Analysis</h3>
+                <div id="analysisResult"></div>
+            </div>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>

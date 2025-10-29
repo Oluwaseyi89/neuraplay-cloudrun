@@ -12,16 +12,25 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import sys
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-e)5s7(1v8tblgsxn3%v8a+@7l*lgc@zp65)n*ra$qvprj-b87^'
+# SECURITY WARNING: keep the secret key used in production secret!  
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -31,6 +40,25 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     ".run.app"
     ]
+
+# Override the default runserver command
+if 'runserver' in sys.argv:
+    # Auto-launch Daphne when runserver is called
+    import subprocess
+    import os
+    
+    # Remove runserver from args to avoid Django's server
+    sys.argv.remove('runserver')
+    
+    # Build and execute Daphne command
+    daphne_cmd = [
+        'daphne',
+        'neuraplay.asgi:application',
+        '--port', '8000', 
+        '--bind', '0.0.0.0'
+    ]
+    
+    os.execvp('daphne', daphne_cmd)
 
 # ALLOWED_HOSTS = [
 #     "localhost",
