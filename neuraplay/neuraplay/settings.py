@@ -60,12 +60,6 @@ if 'runserver' in sys.argv:
     
     os.execvp('daphne', daphne_cmd)
 
-# ALLOWED_HOSTS = [
-#     "localhost",
-#     "127.0.0.1",
-#     ".run.app"
-# ]
-
 
 # Application definition
 
@@ -164,6 +158,29 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+
+
+
+# neuraplay/settings.py
+# Add these to your existing settings
+
+# Celery Configuration
+CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Or your Redis URL
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+
+# Celery Beat Schedule (this is the magic that makes it run automatically)
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-expired-analyses-every-hour': {
+        'task': 'analysis.tasks.cleanup_expired_analyses',
+        'schedule': 3600.0,  # Every hour in seconds
+        # Alternatively, use crontab format:
+        # 'schedule': crontab(minute=0, hour='*/1'),  # Every hour at :00
+    },
+}
 
 
 # Internationalization
