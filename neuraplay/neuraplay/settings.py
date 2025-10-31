@@ -98,6 +98,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://neuraplay-app-930102180917.us-central1.run.app"
 ]
 
+# CORS_ALLOW_ALL_ORIGINS = True
+
 CORS_ALLOW_HEADERS = [
     "authorization",
     "content-type",
