@@ -7,6 +7,9 @@ from google.cloud import texttospeech
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from datetime import datetime, timedelta, timezone
+
 
 
 from neuraplay_ai.services.gemini_service import analyze_fifa_voice_input, analyze_lol_voice_input
@@ -15,6 +18,15 @@ from neuraplay_ai.services.firestore_service import (
     save_lol_analysis,
     get_recent_analyses
 )
+
+
+@csrf_exempt
+def health_check(request):
+    return JsonResponse({
+        "status": "healthy",
+        "service": "neuraplay",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
 
 # ----------------------
 # Firebase JWT Verification

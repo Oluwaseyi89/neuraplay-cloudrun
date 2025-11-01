@@ -110,7 +110,8 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
   useEffect(() => {
     if (!userToken) return;
 
-    const wsUrl = API_BASE.replace('http', 'ws') + '/ws/voice-analysis/';
+    const wsUrl = API_BASE.replace('https', 'wss') + '/ws/voice-analysis/';
+    console.log("WsUrl: ", wsUrl);
     ws.current = new WebSocket(wsUrl);
 
     ws.current.onopen = () => {

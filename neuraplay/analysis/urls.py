@@ -5,7 +5,8 @@ from .views import (
     analyze_fifa_voice,
     get_recent_lol_analyses,
     get_recent_fifa_analyses,
-    analyze_browser_stats  # Add this import
+    analyze_browser_stats,
+    health_check
 )
 
 urlpatterns = [
@@ -19,5 +20,8 @@ urlpatterns = [
 
      # Browser Extension Analysis Endpoint - ADD THIS
     path("analyze/browser-stats/", analyze_browser_stats, name="analyze_browser_stats"),
+
+    # Healthcheck
+    path('health/', health_check, name='health_check'),
 ]
 

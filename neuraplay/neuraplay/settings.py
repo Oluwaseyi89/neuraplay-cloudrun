@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 import sys
+import redis
+
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -33,32 +35,37 @@ except ImportError:
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    ".run.app"
+    "neuraplay-service-930102180917.us-central1.run.app",
+    "neuraplay-service-hvqvt3ycnq-uc.a.run.app",
+    ".run.app",  
+    ".a.run.app", 
     ]
 
-# Override the default runserver command
-if 'runserver' in sys.argv:
-    # Auto-launch Daphne when runserver is called
-    import subprocess
-    import os
+# # Override the default runserver command
+# if 'runserver' in sys.argv:
+#     # Auto-launch Daphne when runserver is called
+#     import subprocess
+#     import os
     
-    # Remove runserver from args to avoid Django's server
-    sys.argv.remove('runserver')
+#     # Remove runserver from args to avoid Django's server
+#     sys.argv.remove('runserver')
     
-    # Build and execute Daphne command
-    daphne_cmd = [
-        'daphne',
-        'neuraplay.asgi:application',
-        '--port', '8000', 
-        '--bind', '0.0.0.0'
-    ]
+#     # Build and execute Daphne command
+#     daphne_cmd = [
+#         'daphne',
+#         'neuraplay.asgi:application',
+#         '--port', '8000', 
+#         '--bind', '0.0.0.0'
+#     ]
     
-    os.execvp('daphne', daphne_cmd)
+#     os.execvp('daphne', daphne_cmd)
+
+
 
 
 # Application definition
@@ -161,26 +168,95 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 
-# neuraplay/settings.py
-# Add these to your existing settings
+# # neuraplay/settings.py
+# # Add these to your existing settings
 
-# Celery Configuration
-CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Or your Redis URL
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+# # Celery Configuration
+# CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Or your Redis URL
+# CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+# CELERY_ACCEPT_CONTENT = ['json']
+# CELERY_TASK_SERIALIZER = 'json'
+# CELERY_RESULT_SERIALIZER = 'json'
+# CELERY_TIMEZONE = 'UTC'
+
+# # Celery Beat Schedule (this is the magic that makes it run automatically)
+# CELERY_BEAT_SCHEDULE = {
+#     'cleanup-expired-analyses-every-hour': {
+#         'task': 'analysis.tasks.cleanup_expired_analyses',
+#         'schedule': 3600.0,  # Every hour in seconds
+#         # Alternatively, use crontab format:
+#         # 'schedule': crontab(minute=0, hour='*/1'),  # Every hour at :00
+#     },
+# }
+
+
+
+# ... your existing imports and base config ...
+
+# Determine environment
+IS_PRODUCTION = True #os.environ.get('PRODUCTION', 'false').lower() == 'true'
+
+# Security settings for production
+if IS_PRODUCTION:
+    # DEBUG = False
+    # ALLOWED_HOSTS = [
+    #     "neuraplay-service-930102180917.us-central1.run.app",
+    #     "localhost",
+    #     "127.0.0.1",
+    # ]
+    
+    # Use environment variable for Redis in production
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+else:
+    DEBUG = True
+    # ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+    REDIS_URL = 'redis://localhost:6379/0'
+
+# Celery Configuration for production
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 
-# Celery Beat Schedule (this is the magic that makes it run automatically)
-CELERY_BEAT_SCHEDULE = {
-    'cleanup-expired-analyses-every-hour': {
-        'task': 'analysis.tasks.cleanup_expired_analyses',
-        'schedule': 3600.0,  # Every hour in seconds
-        # Alternatively, use crontab format:
-        # 'schedule': crontab(minute=0, hour='*/1'),  # Every hour at :00
-    },
-}
+# Channel layers for production
+if IS_PRODUCTION:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer"
+        }
+    }
+
+# Remove the runserver override for production
+# if not IS_PRODUCTION and 'runserver' in sys.argv:
+#     if 'runserver' in sys.argv:
+#         # Auto-launch Daphne when runserver is called
+#         import subprocess
+#         import os
+        
+#         # Remove runserver from args to avoid Django's server
+#         sys.argv.remove('runserver')
+    
+#     # Build and execute Daphne command
+#     daphne_cmd = [
+#         'daphne',
+#         'neuraplay.asgi:application',
+#         '--port', '8000', 
+#         '--bind', '0.0.0.0'
+#     ]
+    
+#     os.execvp('daphne', daphne_cmd)
+#     # ... your existing development runserver code ...
 
 
 # Internationalization

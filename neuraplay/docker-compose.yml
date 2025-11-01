@@ -1,0 +1,45 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - PROCESS_TYPE=web
+      - PORT=8080
+      - PRODUCTION=false
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+
+  celery_worker:
+    build: .
+    environment:
+      - PROCESS_TYPE=worker
+      - PRODUCTION=false
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+
+  celery_beat:
+    build: .
+    environment:
+      - PROCESS_TYPE=beat
+      - PRODUCTION=false
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - .:/app

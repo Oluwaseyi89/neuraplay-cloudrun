@@ -16,6 +16,7 @@ daphne
 google-cloud-speech
 celery 
 redis
+whitenoise
 
 
 
