@@ -91,7 +91,7 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
   const wakeBackoff = useRef<number>(500);
   const isInitialized = useRef(false);
   const ws = useRef<WebSocket | null>(null);
-  const audioContext = useRef<AudioContext | null>(null);
+  // const audioContext = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   // Get current game's wake phrases
@@ -344,20 +344,20 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
   };
 
   // Permission check
-  const checkMicrophonePermission = async (): Promise<boolean> => {
-    try {
-      if (navigator.permissions && (navigator as any).permissions.query) {
-        const p = await (navigator as any).permissions.query({ name: "microphone" });
-        const state = p.state as "granted" | "denied" | "prompt";
-        setMicPermission(state);
-        return state === "granted";
-      }
-      return true;
-    } catch (err) {
-      console.warn("Permission check failed:", err);
-      return false;
-    }
-  };
+  // const checkMicrophonePermission = async (): Promise<boolean> => {
+  //   try {
+  //     if (navigator.permissions && (navigator as any).permissions.query) {
+  //       const p = await (navigator as any).permissions.query({ name: "microphone" });
+  //       const state = p.state as "granted" | "denied" | "prompt";
+  //       setMicPermission(state);
+  //       return state === "granted";
+  //     }
+  //     return true;
+  //   } catch (err) {
+  //     console.warn("Permission check failed:", err);
+  //     return false;
+  //   }
+  // };
 
   /* --------------------------
      Silence timer behavior

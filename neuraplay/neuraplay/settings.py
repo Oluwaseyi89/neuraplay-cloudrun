@@ -179,15 +179,15 @@ AUTH_PASSWORD_VALIDATORS = [
 # CELERY_RESULT_SERIALIZER = 'json'
 # CELERY_TIMEZONE = 'UTC'
 
-# # Celery Beat Schedule (this is the magic that makes it run automatically)
-# CELERY_BEAT_SCHEDULE = {
-#     'cleanup-expired-analyses-every-hour': {
-#         'task': 'analysis.tasks.cleanup_expired_analyses',
-#         'schedule': 3600.0,  # Every hour in seconds
-#         # Alternatively, use crontab format:
-#         # 'schedule': crontab(minute=0, hour='*/1'),  # Every hour at :00
-#     },
-# }
+# Celery Beat Schedule (this is the magic that makes it run automatically)
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-expired-analyses-every-hour': {
+        'task': 'analysis.tasks.cleanup_expired_analyses',
+        'schedule': 3600.0,  # Every hour in seconds
+        # Alternatively, use crontab format:
+        # 'schedule': crontab(minute=0, hour='*/1'),  # Every hour at :00
+    },
+}
 
 
 
