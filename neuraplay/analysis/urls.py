@@ -6,13 +6,16 @@ from .views import (
     get_recent_lol_analyses,
     get_recent_fifa_analyses,
     analyze_browser_stats,
-    health_check
+    health_check,
+    process_voice_input
 )
 
 urlpatterns = [
     # Voice Analysis Endpoints
     path("analyze/lol/", analyze_lol_voice, name="analyze_lol_voice"),
     path("analyze/fifa/", analyze_fifa_voice, name="analyze_fifa_voice"),
+    path('process-voice-input/', process_voice_input, name='process_voice_input'),
+
     
     # Recent Analyses Endpoints  
     path("analyses/recent/lol/", get_recent_lol_analyses, name="recent_lol_analyses"),
