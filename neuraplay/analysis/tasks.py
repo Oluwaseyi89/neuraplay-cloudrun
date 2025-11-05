@@ -1,4 +1,3 @@
-# analysis/tasks.py
 from celery import shared_task
 from neuraplay_ai.services.firestore_service import db
 from datetime import datetime, timezone
@@ -21,12 +20,10 @@ def cleanup_expired_analyses():
         
         for collection_name in collections:
             try:
-                # Query for expired documents
                 query = db.collection(collection_name).where('expire_at', '<=', now)
                 docs = list(query.stream())
                 
                 if docs:
-                    # Batch delete expired documents
                     batch = db.batch()
                     for doc in docs:
                         batch.delete(doc.reference)
@@ -39,7 +36,6 @@ def cleanup_expired_analyses():
                     
             except Exception as e:
                 logger.error(f"❌ Error cleaning up {collection_name}: {str(e)}")
-                # Don't re-raise, continue with other collections
         
         logger.info(f"🎯 Automatic cleanup completed. Total deleted: {total_deleted}")
         return {

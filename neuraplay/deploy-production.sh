@@ -1,15 +1,12 @@
 #!/bin/bash
-# deploy-production.sh
 
 set -e
 
 echo "🚀 Starting NeuraPlay Production Deployment..."
 
-# Get Redis IP
 REDIS_IP=$(gcloud redis instances describe neuraplay-redis --region=us-central1 --format="value(host)")
 echo "🔗 Redis IP: $REDIS_IP"
 
-# Build and deploy Web Service
 echo "🌐 Deploying Web Service..."
 gcloud run deploy neuraplay-service \
   --source . \
@@ -21,7 +18,6 @@ gcloud run deploy neuraplay-service \
   --memory=1Gi \
   --min-instances=1
 
-# Build and deploy Worker Service
 echo "🔧 Deploying Worker Service..."
 gcloud run deploy neuraplay-worker \
   --source . \
@@ -32,7 +28,6 @@ gcloud run deploy neuraplay-worker \
   --memory=512Mi \
   --max-instances=1
 
-# Build and deploy Beat Service
 echo "⏰ Deploying Beat Service..."
 gcloud run deploy neuraplay-beat \
   --source . \

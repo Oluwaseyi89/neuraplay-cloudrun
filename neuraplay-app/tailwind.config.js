@@ -8,11 +8,11 @@ module.exports = {
       extend: {
         colors: {
           primary: {
-            DEFAULT: "#4F46E5", // match your Next.js app's blue
+            DEFAULT: "#4F46E5", 
             dark: "#3730A3",
           },
           secondary: {
-            DEFAULT: "#9333EA", // purple
+            DEFAULT: "#9333EA",
             dark: "#6B21A8",
           },
         },

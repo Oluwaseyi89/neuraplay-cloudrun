@@ -27,7 +27,7 @@ const provider = new GoogleAuthProvider();
 
 const signInWithGoogle = async (): Promise<SignInResult> => {
   const result = await signInWithPopup(auth, provider);
-  const token = await result.user.getIdToken(); // JWT for backend auth
+  const token = await result.user.getIdToken();
   return { user: result.user, token };
 };
 
@@ -39,7 +39,7 @@ export const signInWithGoogleRedirect = async () => {
 
 export const handleRedirectLogin = async () => {
   const result = await getRedirectResult(auth);
-  if (!result) return null; // user has not returned yet
+  if (!result) return null; 
 
   const token = await result.user.getIdToken();
   return { user: result.user, token };

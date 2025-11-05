@@ -1,4 +1,3 @@
-# analysis/urls.py
 from django.urls import path
 from .views import (
     analyze_lol_voice, 
@@ -21,7 +20,7 @@ urlpatterns = [
     path("analyses/recent/lol/", get_recent_lol_analyses, name="recent_lol_analyses"),
     path("analyses/recent/fifa/", get_recent_fifa_analyses, name="recent_fifa_analyses"),
 
-     # Browser Extension Analysis Endpoint - ADD THIS
+    # Browser Extension Analysis Endpoint
     path("analyze/browser-stats/", analyze_browser_stats, name="analyze_browser_stats"),
 
     # Healthcheck
