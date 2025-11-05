@@ -30,38 +30,42 @@ NeuraPlay is a comprehensive AI-powered game coaching platform that provides rea
 
 ## 🏗️ System Architecture
 
-Client Applications → Django Backend (Cloud Run) → AI Services → Data Storage
-     │              │           │               │
-     │              │           │               └── Firebase Firestore (Analysis History)
-     │              │           │               └── Firebase Auth (User Management)
-     │              │           │
-     │              │           ├── Gemini AI (Game Analysis & Coaching)
-     │              │           ├── Speech-to-Text (Voice Transcription)  
-     │              │           └── Text-to-Speech (Audio Responses)
-     │              │
-     ├── React Frontend (Web Dashboard)
-     └── Browser Extension (Game Data Capture)
+```
+    Client Applications → Django Backend (Cloud Run) → AI Services → Data Storage
+        │              │           │               │
+        │              │           │               └── Firebase Firestore (Analysis History)
+        │              │           │               └── Firebase Auth (User Management)
+        │              │           │
+        │              │           ├── Gemini AI (Game Analysis & Coaching)
+        │              │           ├── Speech-to-Text (Voice Transcription)  
+        │              │           └── Text-to-Speech (Audio Responses)
+        │              │
+        ├── React Frontend (Web Dashboard)
+        └── Browser Extension (Game Data Capture)
+``` 
 
 
 ## 📁 Project Structure
 
-neuraplay-cloudrun/
-├── neuraplay/                 # Django Backend
-│   ├── analysis/             # Game analysis logic
-│   ├── neuraplay_ai/         # AI services (Gemini, STT, TTS)
-│   └── manage.py
-├── neuraplay-app/            # React Frontend
-│   ├── src/
-│   │   ├── components/       # VoiceInput, LoginButton
-│   │   ├── firebase/         # Firebase configuration
-│   │   └── store/            # State management
-│   └── package.json
-├── neuraplay-extension/      # Chrome Browser Extension
-│   ├── content/              # Page scraping scripts
-│   ├── background/           # Service worker
-│   ├── popup/                # Extension interface
-│   └── manifest.json
-└── README.md                 # This file
+```
+    neuraplay-cloudrun/
+    ├── neuraplay/                 # Django Backend
+    │   ├── analysis/             # Game analysis logic
+    │   ├── neuraplay_ai/         # AI services (Gemini, STT, TTS)
+    │   └── manage.py
+    ├── neuraplay-app/            # React Frontend
+    │   ├── src/
+    │   │   ├── components/       # VoiceInput, LoginButton
+    │   │   ├── firebase/         # Firebase configuration
+    │   │   └── store/            # State management
+    │   └── package.json
+    ├── neuraplay-extension/      # Chrome Browser Extension
+    │   ├── content/              # Page scraping scripts
+    │   ├── background/           # Service worker
+    │   ├── popup/                # Extension interface
+    │   └── manifest.json
+    └── README.md                 # This file
+```
 
 
 ## 🚀 Quick Start

@@ -49,19 +49,21 @@ NeuraPlay Browser Extension automatically analyzes your gaming statistics from p
 
 ## 🏗️ Extension Architecture
 
-neuraplay-extension/
-├── manifest.json          # Extension configuration
-├── popup/
-│   └── popup.html        # Extension popup interface
-├── content/
-│   ├── content.js        # Page scraping & analysis
-│   └── content.css       # Overlay styling
-├── background/
-│   └── background.js     # Background service worker
-└── icons/
-    ├── icon16.png        # Extension icons
-    ├── icon48.png
-    └── icon128.png
+```
+    neuraplay-extension/
+    ├── manifest.json          # Extension configuration
+    ├── popup/
+    │   └── popup.html        # Extension popup interface
+    ├── content/
+    │   ├── content.js        # Page scraping & analysis
+    │   └── content.css       # Overlay styling
+    ├── background/
+    │   └── background.js     # Background service worker
+    └── icons/
+        ├── icon16.png        # Extension icons
+        ├── icon48.png
+        └── icon128.png
+```
 
 ## ⚙️ Permissions
 

@@ -72,22 +72,23 @@ VITE_FIREBASE_MEASUREMENT_ID=your_measurement_id
 
 ## 🏗️ Project Structure
 
-neuraplay-app/
-├── src/
-│   ├── components/          # React components
-│   │   ├── LoginButton.tsx  # Firebase authentication
-│   │   └── VoiceInput.tsx   # Voice recording & analysis
-│   ├── firebase/           # Firebase configuration
-│   │   └── firebaseClient.ts
-│   ├── store/              # State management
-│   │   └── auth-store.ts   # Authentication store
-│   ├── App.tsx            # Main application component
-│   └── main.tsx           # Application entry point
-├── public/                # Static assets
-├── package.json
-├── vite.config.ts        # Vite configuration
-└── env.example           # Environment variables template
-
+```
+  neuraplay-app/
+  ├── src/
+  │   ├── components/          # React components
+  │   │   ├── LoginButton.tsx  # Firebase authentication
+  │   │   └── VoiceInput.tsx   # Voice recording & analysis
+  │   ├── firebase/           # Firebase configuration
+  │   │   └── firebaseClient.ts
+  │   ├── store/              # State management
+  │   │   └── auth-store.ts   # Authentication store
+  │   ├── App.tsx            # Main application component
+  │   └── main.tsx           # Application entry point
+  ├── public/                # Static assets
+  ├── package.json
+  ├── vite.config.ts        # Vite configuration
+  └── env.example           # Environment variables template
+```
 
 ## 🎯 Core Components
 

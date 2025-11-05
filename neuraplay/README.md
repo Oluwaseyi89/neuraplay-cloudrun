@@ -10,17 +10,19 @@ NeuraPlay Backend is a sophisticated Django server that powers real-time AI coac
 
 ## 🏗️ Architecture
 
-Client Apps → Django Backend (Cloud Run) → AI Services → Data Storage
-     │              │           │               │
-     │              │           │               └── Firebase Firestore (Analysis History)
-     │              │           │               └── Firebase Auth (User Management)
-     │              │           │
-     │              │           ├── Gemini AI (Game Analysis & Coaching)
-     │              │           ├── Speech-to-Text (Voice Transcription)  
-     │              │           └── Text-to-Speech (Audio Responses)
-     │              │
-     ├── React Frontend (Web Dashboard)
-     └── Browser Extension (Game Data Capture)
+```
+    Client Apps → Django Backend (Cloud Run) → AI Services → Data Storage
+        │              │           │               │
+        │              │           │               └── Firebase Firestore (Analysis History)
+        │              │           │               └── Firebase Auth (User Management)
+        │              │           │
+        │              │           ├── Gemini AI (Game Analysis & Coaching)
+        │              │           ├── Speech-to-Text (Voice Transcription)  
+        │              │           └── Text-to-Speech (Audio Responses)
+        │              │
+        ├── React Frontend (Web Dashboard)
+        └── Browser Extension (Game Data Capture)
+```
 
 ## 🛠️ Tech Stack
 
