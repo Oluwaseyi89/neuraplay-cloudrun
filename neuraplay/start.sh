@@ -1,26 +1,10 @@
 #!/bin/bash
 set -e
 
-PORT=${PORT:-8080}
+PORT=${PORT:-8000}
 echo "Starting on port: $PORT"
 
 python manage.py migrate --noinput
 
-if [ "$PROCESS_TYPE" = "worker" ]; then
-    echo "Starting Celery Worker..."
-    exec celery -A neuraplay worker --loglevel=info
-elif [ "$PROCESS_TYPE" = "beat" ]; then
-    echo "Starting Celery Beat..."
-    exec celery -A neuraplay beat --loglevel=info
-else
-    echo "Starting Django Server with WebSocket, Celery Worker AND Beat..."
-    
-    echo "Starting Celery Worker in background..."
-    celery -A neuraplay worker --loglevel=info --concurrency=1 &
-    
-    echo "Starting Celery Beat in background..."
-    celery -A neuraplay beat --loglevel=info &
-    
-    echo "Starting Daphne WebSocket server..."
-    exec daphne -b 0.0.0.0 -p $PORT neuraplay.asgi:application
-fi
+echo "Starting Daphne (HTTP + WebSocket)..."
+exec daphne -b 0.0.0.0 -p "$PORT" neuraplay.asgi:application

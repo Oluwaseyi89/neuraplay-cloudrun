@@ -11,9 +11,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 import os
 
-
+import dj_database_url
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -26,56 +27,44 @@ except ImportError:
     pass
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).lower() in ('true', '1', 'yes')
+
+
+def env_list(name: str, default: str = '') -> list:
+    return [item.strip() for item in os.environ.get(name, default).split(',') if item.strip()]
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!  
+# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = env_bool('DJANGO_DEBUG')
 
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "neuraplay-service-930102180917.us-central1.run.app",
-    "neuraplay-service-hvqvt3ycnq-uc.a.run.app",
-    ".run.app",  
-    ".a.run.app", 
-    ]
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 
-# # Override the default runserver command
-# if 'runserver' in sys.argv:
-#     # Auto-launch Daphne when runserver is called
-#     import subprocess
-#     import os
-    
-#     # Remove runserver from args to avoid Django's server
-#     sys.argv.remove('runserver')
-    
-#     # Build and execute Daphne command
-#     daphne_cmd = [
-#         'daphne',
-#         'neuraplay.asgi:application',
-#         '--port', '8000', 
-#         '--bind', '0.0.0.0'
-#     ]
-    
-#     os.execvp('daphne', daphne_cmd)
-
-
+# Render sets this to the service's public hostname
+RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
+    'authentication.apps.AuthenticationConfig',
     'analysis.apps.AnalysisConfig',
     'corsheaders',
     'channels'
@@ -83,22 +72,20 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
 ]
 
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "https://neuraplay-app-930102180917.us-central1.run.app"
-]
+# CORS / CSRF - frontend origins (e.g. the Vercel/Netlify URL), comma separated
 
-# CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS', 'http://localhost:5173')
 
 CORS_ALLOW_HEADERS = [
     "authorization",
@@ -106,6 +93,10 @@ CORS_ALLOW_HEADERS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+if RENDER_EXTERNAL_HOSTNAME:
+    CSRF_TRUSTED_ORIGINS.append(f'https://{RENDER_EXTERNAL_HOSTNAME}')
 
 ROOT_URLCONF = 'neuraplay.urls'
 
@@ -128,22 +119,92 @@ WSGI_APPLICATION = 'neuraplay.wsgi.application'
 
 ASGI_APPLICATION = 'neuraplay.asgi.application'
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
-    }
-}
+# The voice consumer is point-to-point (no groups/broadcasts), so the in-memory
+# layer is enough. Set REDIS_URL only if you later add cross-instance messaging.
+REDIS_URL = os.environ.get('REDIS_URL')
 
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer"
+        }
+    }
 
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+#
+# Production (Supabase): set DATABASE_URL to the Session pooler connection string.
+# Local: falls back to the individual POSTGRES_* variables.
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=int(os.environ.get('DATABASE_CONN_MAX_AGE', 60)),
+            conn_health_checks=True,
+            ssl_require=env_bool('DATABASE_SSL_REQUIRE', True),
+        )
     }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('POSTGRES_DB', 'neuraplay_db'),
+            'USER': os.environ.get('POSTGRES_USER', 'neura_play_user'),
+            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
+            'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+            'CONN_MAX_AGE': int(os.environ.get('DATABASE_CONN_MAX_AGE', 60)),
+            'CONN_HEALTH_CHECKS': True,
+        }
+    }
+
+# Supabase transaction pooler (port 6543) doesn't support persistent connections
+# or server-side cursors. Not needed for the session pooler (port 5432).
+if env_bool('DATABASE_TRANSACTION_POOLER'):
+    DATABASES['default']['CONN_MAX_AGE'] = 0
+    DATABASES['default']['DISABLE_SERVER_SIDE_CURSORS'] = True
+
+
+# Authentication
+# Users are stored in the database and authenticated with JWTs (SimpleJWT)
+
+AUTH_USER_MODEL = 'authentication.User'
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'auth': os.environ.get('AUTH_THROTTLE_RATE', '20/minute'),
+    },
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.environ.get('JWT_ACCESS_TOKEN_MINUTES', 30))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.environ.get('JWT_REFRESH_TOKEN_DAYS', 7))),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
 
@@ -166,96 +227,13 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+# Security behind Render's HTTPS proxy
 
-# # neuraplay/settings.py
-# # Add these to your existing settings
-
-# # Celery Configuration
-# CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Or your Redis URL
-# CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
-# CELERY_ACCEPT_CONTENT = ['json']
-# CELERY_TASK_SERIALIZER = 'json'
-# CELERY_RESULT_SERIALIZER = 'json'
-# CELERY_TIMEZONE = 'UTC'
-
-# Celery Beat Schedule (this is the magic that makes it run automatically)
-CELERY_BEAT_SCHEDULE = {
-    'cleanup-expired-analyses-every-hour': {
-        'task': 'analysis.tasks.cleanup_expired_analyses',
-        'schedule': 3600.0,  # Every hour in seconds
-        # Alternatively, use crontab format:
-        # 'schedule': crontab(minute=0, hour='*/1'),  # Every hour at :00
-    },
-}
-
-
-
-# ... your existing imports and base config ...
-
-# Determine environment
-IS_PRODUCTION = True #os.environ.get('PRODUCTION', 'false').lower() == 'true'
-
-# Security settings for production
-if IS_PRODUCTION:
-    # DEBUG = False
-    # ALLOWED_HOSTS = [
-    #     "neuraplay-service-930102180917.us-central1.run.app",
-    #     "localhost",
-    #     "127.0.0.1",
-    # ]
-    
-    # Use environment variable for Redis in production
-    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-else:
-    DEBUG = True
-    # ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
-    REDIS_URL = 'redis://localhost:6379/0'
-
-# Celery Configuration for production
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'UTC'
-
-# Channel layers for production
-if IS_PRODUCTION:
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {
-                "hosts": [REDIS_URL],
-            },
-        },
-    }
-else:
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer"
-        }
-    }
-
-# Remove the runserver override for production
-# if not IS_PRODUCTION and 'runserver' in sys.argv:
-#     if 'runserver' in sys.argv:
-#         # Auto-launch Daphne when runserver is called
-#         import subprocess
-#         import os
-        
-#         # Remove runserver from args to avoid Django's server
-#         sys.argv.remove('runserver')
-    
-#     # Build and execute Daphne command
-#     daphne_cmd = [
-#         'daphne',
-#         'neuraplay.asgi:application',
-#         '--port', '8000', 
-#         '--bind', '0.0.0.0'
-#     ]
-    
-#     os.execvp('daphne', daphne_cmd)
-#     # ... your existing development runserver code ...
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
 # Internationalization
@@ -270,18 +248,25 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files (CSS, JavaScript, Images)
+# Static files (CSS, JavaScript, Images) - served by WhiteNoise
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-PORT = int(os.environ.get("PORT", 8080))
-
-STATIC_ROOT = os.path.join(BASE_DIR, "static")
-
-
+PORT = int(os.environ.get("PORT", 8000))

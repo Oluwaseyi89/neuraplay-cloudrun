@@ -2,67 +2,47 @@ import base64
 import json
 import os
 import threading
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from google.oauth2 import service_account
 from google.cloud import texttospeech
 from google.cloud import speech
-import firebase_admin
-from firebase_admin import auth as firebase_auth
-from firebase_admin import credentials as firebase_credentials
+from django.db import connection
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from datetime import datetime, timedelta, timezone
 
 from neuraplay_ai.services.gemini_service import analyze_fifa_voice_input, analyze_lol_voice_input
-from neuraplay_ai.services.firestore_service import (
-    save_fifa_analysis, 
-    save_lol_analysis,
-    get_recent_analyses
-)
-
-def initialize_firebase():
-    """Initialize Firebase Admin with base64 credentials"""
-    try:
-        if not firebase_admin._apps:
-            base64_creds = os.environ.get('FIREBASE_CREDENTIALS_BASE64')
-            if not base64_creds:
-                raise ValueError("FIREBASE_CREDENTIALS_BASE64 environment variable not set")
-            
-            credentials_json = base64.b64decode(base64_creds).decode('utf-8')
-            credentials_info = json.loads(credentials_json)
-            
-            creds = firebase_credentials.Certificate(credentials_info)
-            firebase_admin.initialize_app(creds)
-            print("✅ Firebase Admin initialized successfully")
-        return True
-    except Exception as e:
-        print(f"❌ Firebase Admin initialization failed: {e}")
-        return False
-
-firebase_initialized = initialize_firebase()
+from neuraplay_ai.services.analysis_service import save_analysis, get_recent_analyses
 
 _google_clients = {}
 _google_lock = threading.Lock()
 
+def get_google_credentials_info():
+    """Decode the base64 Google Cloud service account JSON (used for Speech-to-Text and TTS)"""
+    base64_creds = os.environ.get('GOOGLE_CLOUD_CREDENTIALS_BASE64') or os.environ.get('FIREBASE_CREDENTIALS_BASE64')
+    if not base64_creds:
+        return None
+
+    credentials_json = base64.b64decode(base64_creds).decode('utf-8')
+    return json.loads(credentials_json)
+
 def get_google_credentials():
-    """Get Google Cloud credentials from FIREBASE_CREDENTIALS_BASE64"""
+    """Get Google Cloud credentials from GOOGLE_CLOUD_CREDENTIALS_BASE64"""
     try:
-        base64_creds = os.environ.get('FIREBASE_CREDENTIALS_BASE64')
-        if not base64_creds:
-            raise ValueError("FIREBASE_CREDENTIALS_BASE64 environment variable not set")
-        
-        credentials_json = base64.b64decode(base64_creds).decode('utf-8')
-        credentials_info = json.loads(credentials_json)
-        
+        credentials_info = get_google_credentials_info()
+        if not credentials_info:
+            raise ValueError("GOOGLE_CLOUD_CREDENTIALS_BASE64 environment variable not set")
+
         return service_account.Credentials.from_service_account_info(credentials_info)
     except Exception as e:
         print(f"❌ Failed to get Google credentials: {e}")
         return None
 
 def get_speech_client():
-    """Thread-safe Speech client using Firebase credentials"""
+    """Thread-safe Speech client using Google Cloud credentials"""
     thread_id = threading.get_ident()
     
     with _google_lock:
@@ -80,7 +60,7 @@ def get_speech_client():
         return _google_clients[f"speech_{thread_id}"]
 
 def get_tts_client():
-    """Thread-safe TTS client using Firebase credentials"""
+    """Thread-safe TTS client using Google Cloud credentials"""
     thread_id = threading.get_ident()
     
     with _google_lock:
@@ -101,7 +81,7 @@ def get_tts_client():
 def health_check(request):
     """Health check endpoint"""
     services_status = {
-        "firebase": firebase_initialized,
+        "database": _database_available(),
         "speech_client": get_speech_client() is not None,
         "tts_client": get_tts_client() is not None
     }
@@ -113,21 +93,13 @@ def health_check(request):
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
-# ----------------------
-# Firebase JWT Verification
-# ----------------------
-def verify_firebase_token(id_token: str):
-    """Verify Firebase JWT token"""
-    if not firebase_initialized:
-        print("❌ Firebase not initialized")
-        return None
-        
+def _database_available() -> bool:
     try:
-        decoded_token = firebase_auth.verify_id_token(id_token)
-        return decoded_token["uid"]
+        connection.ensure_connection()
+        return True
     except Exception as e:
-        print(f"❌ Firebase token verification failed: {e}")
-        return None
+        print(f"❌ Database connection failed: {e}")
+        return False
 
 # ----------------------
 # Helper: Convert text to speech using GCP TTS
@@ -207,24 +179,15 @@ def build_response_data(result: dict) -> dict:
         }
 
 # ----------------------
-# Helper: Save analysis to Firestore
+# Helper: Save analysis to the database
 # ----------------------
-def save_analysis_data(user_id: str, user_text: str, result: dict, game: str):
-    """Save analysis data to Firestore"""
-    if not firebase_initialized:
-        print("⚠️ Firebase not initialized, skipping Firestore save")
-        return
-        
-    user_data = {"user_id": user_id, "text": user_text}
-    
+def save_analysis_data(user_id, user_text: str, result: dict, game: str):
+    """Save analysis data to the database"""
     try:
-        if game == "fifa":
-            save_fifa_analysis(user_data, result)
-        else:
-            save_lol_analysis(user_data, result)
+        save_analysis(user_id, user_text, result, game)
         print(f"✅ Successfully saved {game} analysis for user {user_id}")
     except Exception as e:
-        print(f"❌ Firestore Save Error for {game}: {e}")
+        print(f"❌ Database Save Error for {game}: {e}")
 
 # ----------------------
 # HTTP Voice Processing Endpoint (Mobile)
@@ -233,10 +196,7 @@ def save_analysis_data(user_id: str, user_text: str, result: dict, game: str):
 @csrf_exempt
 def process_voice_input(request):
     """HTTP equivalent of WebSocket voice processing - single endpoint for mobile"""
-    id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user_id = verify_firebase_token(id_token)
-    if not user_id:
-        return Response({"error": "Unauthorized"}, status=401)
+    user_id = request.user.id
 
     if 'audio' not in request.FILES:
         return Response({"error": "No audio file provided"}, status=400)
@@ -306,10 +266,7 @@ def process_voice_input(request):
 @api_view(['POST'])
 def analyze_fifa_voice(request):
     """Analyze FIFA gameplay from voice input"""
-    id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user_id = verify_firebase_token(id_token)
-    if not user_id:
-        return Response({"error": "Unauthorized"}, status=401)
+    user_id = request.user.id
 
     user_text = request.data.get("stats")
     if not user_text:
@@ -332,10 +289,7 @@ def analyze_fifa_voice(request):
 @api_view(['POST']) 
 def analyze_lol_voice(request):
     """Analyze LoL gameplay from voice input"""
-    id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user_id = verify_firebase_token(id_token)
-    if not user_id:
-        return Response({"error": "Unauthorized"}, status=401)
+    user_id = request.user.id
 
     user_text = request.data.get("stats")
     if not user_text:
@@ -361,10 +315,7 @@ def analyze_lol_voice(request):
 @api_view(['GET'])
 def get_recent_fifa_analyses(request):
     """Get recent FIFA analyses for authenticated user"""
-    id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user_id = verify_firebase_token(id_token)
-    if not user_id:
-        return Response({"error": "Unauthorized"}, status=401)
+    user_id = request.user.id
 
     try:
         limit = int(request.GET.get('limit', 10))
@@ -384,10 +335,7 @@ def get_recent_fifa_analyses(request):
 @api_view(['GET'])
 def get_recent_lol_analyses(request):
     """Get recent LoL analyses for authenticated user"""
-    id_token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    user_id = verify_firebase_token(id_token)
-    if not user_id:
-        return Response({"error": "Unauthorized"}, status=401)
+    user_id = request.user.id
 
     try:
         limit = int(request.GET.get('limit', 10))
@@ -408,7 +356,7 @@ def get_recent_lol_analyses(request):
 # Browser Extension Support
 # ----------------------
 @api_view(['POST'])
-@csrf_exempt
+@permission_classes([AllowAny])
 def analyze_browser_stats(request):
     """
     Analyze game stats from browser extension

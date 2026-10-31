@@ -3,14 +3,15 @@ import base64
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from google.cloud import speech
 from google.cloud import texttospeech
-from google.oauth2 import service_account
 
 from neuraplay_ai.services.gemini_service import analyze_fifa_voice_input, analyze_lol_voice_input
-from neuraplay_ai.services.firestore_service import save_fifa_analysis, save_lol_analysis
-from analysis.views import verify_firebase_token, build_response_data
+from neuraplay_ai.services.analysis_service import save_analysis
+from analysis.views import build_response_data, get_google_credentials
+from authentication.tokens import get_user_from_access_token
 
 
 class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
@@ -29,21 +30,16 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
         try:
             os.environ['GRPC_DNS_RESOLVER'] = 'native'
             
-            credentials_b64 = os.environ.get('FIREBASE_CREDENTIALS_BASE64')
-            
-            if credentials_b64:
-                credentials_json = base64.b64decode(credentials_b64).decode('utf-8')
-                credentials_info = json.loads(credentials_json)
-                
-                credentials = service_account.Credentials.from_service_account_info(credentials_info)
-                
+            credentials = get_google_credentials()
+
+            # No fallback to Application Default Credentials: outside Google Cloud the
+            # lookup probes the metadata server and blocks the event loop for ~12s
+            if credentials:
                 self.speech_client = speech.SpeechClient(credentials=credentials)
                 self.tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
                 print("✅ Google Cloud clients initialized with base64 credentials")
             else:
-                self.speech_client = speech.SpeechClient()
-                self.tts_client = texttospeech.TextToSpeechClient()
-                print("✅ Google Cloud clients initialized with default credentials")
+                print("⚠️ GOOGLE_CLOUD_CREDENTIALS_BASE64 not set - Speech-to-Text and TTS disabled")
                 
         except Exception as e:
             print(f"❌ Failed to initialize Google Cloud clients: {e}")
@@ -63,18 +59,20 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
             await self._handle_audio_chunk(data)
         elif message_type == "speech_end":
             await self._handle_speech_end(data)
+        elif message_type == "speech_cancel":
+            self.buffered_audio = b""
 
     async def _handle_auth(self, data):
         """Handle authentication"""
-        id_token = data.get("token", "")
-        user_id = verify_firebase_token(id_token)
-        
-        if not user_id:
+        access_token = data.get("token", "")
+        user = await database_sync_to_async(get_user_from_access_token)(access_token)
+
+        if not user:
             await self.send_json({"error": "Unauthorized"})
             await self.close()
             return
-            
-        self.user_id = user_id
+
+        self.user_id = user.id
         await self.send_json({"status": "authenticated"})
 
     async def _handle_audio_chunk(self, data):
@@ -91,14 +89,18 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
         game = data.get("game", "fifa")
         self.game = game
 
-        transcript = await self._transcribe_audio(self.buffered_audio)
+        # Take the buffer up front so a failure below can't leak audio into the next utterance
+        audio_bytes = self.buffered_audio
+        self.buffered_audio = b""
+
+        transcript = await self._transcribe_audio(audio_bytes)
         await self.send_json({"transcript": transcript})
 
         try:
-            if game == "lol":
-                gemini_result = analyze_lol_voice_input(transcript)
-            else:
-                gemini_result = analyze_fifa_voice_input(transcript)
+            analyze = analyze_lol_voice_input if game == "lol" else analyze_fifa_voice_input
+            # Gemini calls block for seconds; keep them off the event loop
+            loop = asyncio.get_running_loop()
+            gemini_result = await loop.run_in_executor(self.thread_pool, analyze, transcript)
         except Exception as e:
             await self.send_json({"error": f"Analysis failed: {str(e)}"})
             return
@@ -106,14 +108,10 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
         response_data = build_response_data(gemini_result)
 
         try:
-            user_data = {"user_id": self.user_id, "text": transcript}
-            if game == "lol":
-                save_lol_analysis(user_data, gemini_result) 
-            else:
-                save_fifa_analysis(user_data, gemini_result) 
-            print(f"✅ Saved {game} analysis to Firestore")
+            await database_sync_to_async(save_analysis)(self.user_id, transcript, gemini_result, game)
+            print(f"✅ Saved {game} analysis to database")
         except Exception as e:
-            print(f"❌ Firestore Save Error: {e}")
+            print(f"❌ Database Save Error: {e}")
 
         tts_audio_b64 = None
         try:
@@ -136,8 +134,6 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
             response_payload["tts_audio"] = tts_audio_b64
         
         await self.send_json(response_payload)
-
-        self.buffered_audio = b""
 
     async def _transcribe_audio(self, audio_bytes: bytes) -> str:
         """Transcribe audio using Google Speech-to-Text (async)"""
