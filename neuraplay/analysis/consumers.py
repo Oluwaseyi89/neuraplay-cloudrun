@@ -32,14 +32,14 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
             
             credentials = get_google_credentials()
 
+            # No fallback to Application Default Credentials: outside Google Cloud the
+            # lookup probes the metadata server and blocks the event loop for ~12s
             if credentials:
                 self.speech_client = speech.SpeechClient(credentials=credentials)
                 self.tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
                 print("✅ Google Cloud clients initialized with base64 credentials")
             else:
-                self.speech_client = speech.SpeechClient()
-                self.tts_client = texttospeech.TextToSpeechClient()
-                print("✅ Google Cloud clients initialized with default credentials")
+                print("⚠️ GOOGLE_CLOUD_CREDENTIALS_BASE64 not set - Speech-to-Text and TTS disabled")
                 
         except Exception as e:
             print(f"❌ Failed to initialize Google Cloud clients: {e}")
