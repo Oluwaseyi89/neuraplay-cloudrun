@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: neuraplay-api
+    runtime: python
+    rootDir: neuraplay
+    plan: free
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: ./start.sh
+    healthCheckPath: /api/health/
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      # Supabase Session pooler connection string (port 5432), e.g.
+      # postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL_REQUIRE
+        value: "true"
+      # Frontend origin(s) on Vercel/Netlify, comma separated
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GENAI_TIMEOUT_SECONDS
+        value: "30"
+      - key: GOOGLE_CLOUD_CREDENTIALS_BASE64
+        sync: false
+      - key: GRPC_DNS_RESOLVER
+        value: native
