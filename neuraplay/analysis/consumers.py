@@ -59,6 +59,8 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
             await self._handle_audio_chunk(data)
         elif message_type == "speech_end":
             await self._handle_speech_end(data)
+        elif message_type == "speech_cancel":
+            self.buffered_audio = b""
 
     async def _handle_auth(self, data):
         """Handle authentication"""
@@ -87,14 +89,18 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
         game = data.get("game", "fifa")
         self.game = game
 
-        transcript = await self._transcribe_audio(self.buffered_audio)
+        # Take the buffer up front so a failure below can't leak audio into the next utterance
+        audio_bytes = self.buffered_audio
+        self.buffered_audio = b""
+
+        transcript = await self._transcribe_audio(audio_bytes)
         await self.send_json({"transcript": transcript})
 
         try:
-            if game == "lol":
-                gemini_result = analyze_lol_voice_input(transcript)
-            else:
-                gemini_result = analyze_fifa_voice_input(transcript)
+            analyze = analyze_lol_voice_input if game == "lol" else analyze_fifa_voice_input
+            # Gemini calls block for seconds; keep them off the event loop
+            loop = asyncio.get_running_loop()
+            gemini_result = await loop.run_in_executor(self.thread_pool, analyze, transcript)
         except Exception as e:
             await self.send_json({"error": f"Analysis failed: {str(e)}"})
             return
@@ -128,8 +134,6 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
             response_payload["tts_audio"] = tts_audio_b64
         
         await self.send_json(response_payload)
-
-        self.buffered_audio = b""
 
     async def _transcribe_audio(self, audio_bytes: bytes) -> str:
         """Transcribe audio using Google Speech-to-Text (async)"""
