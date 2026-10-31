@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from "react";
-import LoginButton from "./components/LoginButton";
+import LoginForm from "./components/LoginForm";
+import RegisterForm from "./components/RegisterForm";
 import VoiceInput from "./components/VoiceInput";
 import { useAuthStore } from "./store/auth-store";
-import { auth } from "./firebase/firebaseClient";
-import { signOut, onAuthStateChanged } from "firebase/auth";
-import axios from "axios";
+import api, { authApi, refreshAccessToken, secondsUntilExpiry } from "./services/api";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
-
+type AuthView = "login" | "register";
 type TabType = "voice" | "analyses";
 type GameType = "fifa" | "lol";
 
@@ -27,7 +25,8 @@ interface AnalysisHistory {
 }
 
 const App: React.FC = () => {
-  const { user, token, login, logout } = useAuthStore();
+  const { user, token, refreshToken, setUser, logout } = useAuthStore();
+  const [authView, setAuthView] = useState<AuthView>("login");
   const [activeTab, setActiveTab] = useState<TabType>("voice");
   const [analysisGameTab, setAnalysisGameTab] = useState<GameType>("fifa");
   const [fifaAnalysis, setFifaAnalysis] = useState<any>(null);
@@ -37,18 +36,25 @@ const App: React.FC = () => {
   const [loadingAnalyses, setLoadingAnalyses] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Validate a persisted session on load (refreshes the token if it expired)
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        logout();
-        return;
-      }
-      const idToken = await firebaseUser.getIdToken();
-      login(firebaseUser, idToken);
-    });
+    if (!refreshToken) return;
+    authApi.me().then(setUser).catch(() => logout());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    return () => unsub();
-  }, [login, logout]);
+  // Refresh the access token shortly before it expires so the WebSocket keeps a valid token
+  useEffect(() => {
+    if (!token) return;
+    const secondsLeft = secondsUntilExpiry(token);
+    if (secondsLeft === null) return;
+
+    const timer = setTimeout(() => {
+      refreshAccessToken();
+    }, Math.max(secondsLeft - 60, 0) * 1000);
+
+    return () => clearTimeout(timer);
+  }, [token]);
 
   useEffect(() => {
     if (activeTab === "analyses" && token) {
@@ -61,10 +67,7 @@ const App: React.FC = () => {
 
     setLoadingAnalyses(true);
     try {
-      const url = `${API_BASE}/api/analyses/recent/${analysisGameTab}/`;
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await api.get(`/api/analyses/recent/${analysisGameTab}/`);
 
       if (analysisGameTab === "fifa") {
         setRecentFifaAnalyses(response.data.analyses || []);
@@ -84,7 +87,13 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
+    if (refreshToken) {
+      try {
+        await authApi.logout(refreshToken);
+      } catch (error) {
+        console.warn("⚠️ Server logout failed, clearing local session anyway:", error);
+      }
+    }
     logout();
     setIsMobileMenuOpen(false);
   };
@@ -114,8 +123,28 @@ const App: React.FC = () => {
               <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent mb-3">
                 NeuraPlay
               </h1>
-              <p className="text-gray-300 text-lg mb-8">AI Game Analysis Coach</p>
-              <LoginButton />
+              <p className="text-gray-300 text-lg mb-6">AI Game Analysis Coach</p>
+
+              <div className="flex bg-gray-900/50 rounded-xl p-1 mb-6">
+                {(["login", "register"] as AuthView[]).map((view) => (
+                  <button
+                    key={view}
+                    type="button"
+                    onClick={() => setAuthView(view)}
+                    className={`flex-1 py-2 rounded-lg font-semibold transition-all duration-200 ${
+                      authView === view ? "bg-purple-600 text-white shadow-lg" : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {view === "login" ? "Log in" : "Sign up"}
+                  </button>
+                ))}
+              </div>
+
+              {authView === "login" ? (
+                <LoginForm onSwitchToRegister={() => setAuthView("register")} />
+              ) : (
+                <RegisterForm onSwitchToLogin={() => setAuthView("login")} />
+              )}
             </div>
           </div>
         </div>
@@ -149,7 +178,7 @@ const App: React.FC = () => {
                 <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
                   NeuraPlay
                 </h1>
-                <p className="text-gray-300 text-xs">Hi, {user.displayName?.split(' ')[0]}</p>
+                <p className="text-gray-300 text-xs">Hi, {user.first_name || user.username}</p>
               </div>
             </div>
 
@@ -199,7 +228,7 @@ const App: React.FC = () => {
               <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
                 NeuraPlay Coach
               </h1>
-              <p className="text-gray-300 text-lg">Welcome back, {user.displayName}</p>
+              <p className="text-gray-300 text-lg">Welcome back, {user.display_name || user.username}</p>
             </div>
 
             {/* Center: Desktop Tabs */}
