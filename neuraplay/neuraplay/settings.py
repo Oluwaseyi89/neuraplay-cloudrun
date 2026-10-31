@@ -46,7 +46,7 @@ DEBUG = env_bool('DJANGO_DEBUG')
 
 ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 
-# Render sets this to the service's public hostname (e.g. neuraplay-api.onrender.com)
+# Render sets this to the service's public hostname
 RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
