@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Mic, Square, Ear, EarOff, RefreshCw, Volume2, VolumeX } from "lucide-react";
+import api, { API_BASE } from "../services/api";
 
 type GameType = "fifa" | "lol";
 
@@ -8,8 +9,6 @@ interface Props {
   initialGame?: GameType;
   onAnalysis?: (data: any) => void;
 }
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 // Game-specific wake phrases
 const FIFA_WAKE_PHRASES = [
@@ -217,19 +216,7 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
 
       console.log(`📤 Sending audio via HTTP: ${audioBlob.size} bytes`);
 
-      const response = await fetch(`${API_BASE}/api/process-voice-input/`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${userToken}`,
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
-      }
-
-      const data = await response.json();
+      const { data } = await api.post('/api/process-voice-input/', formData);
       
       if (data.transcript) {
         console.log(`✅ Transcript received: "${data.transcript}"`);
@@ -308,7 +295,7 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
     if (!userToken) return;
 
     const setupWebSocket = () => {
-      const wsUrl = API_BASE.replace('https', 'wss') + '/ws/voice-analysis/';
+      const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/voice-analysis/';
       ws.current = new WebSocket(wsUrl);
 
       ws.current.onopen = () => {
