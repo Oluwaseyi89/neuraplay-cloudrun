@@ -3,14 +3,15 @@ import base64
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from google.cloud import speech
 from google.cloud import texttospeech
-from google.oauth2 import service_account
 
 from neuraplay_ai.services.gemini_service import analyze_fifa_voice_input, analyze_lol_voice_input
-from neuraplay_ai.services.firestore_service import save_fifa_analysis, save_lol_analysis
-from analysis.views import verify_firebase_token, build_response_data
+from neuraplay_ai.services.analysis_service import save_analysis
+from analysis.views import build_response_data, get_google_credentials
+from authentication.tokens import get_user_from_access_token
 
 
 class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
@@ -29,14 +30,9 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
         try:
             os.environ['GRPC_DNS_RESOLVER'] = 'native'
             
-            credentials_b64 = os.environ.get('FIREBASE_CREDENTIALS_BASE64')
-            
-            if credentials_b64:
-                credentials_json = base64.b64decode(credentials_b64).decode('utf-8')
-                credentials_info = json.loads(credentials_json)
-                
-                credentials = service_account.Credentials.from_service_account_info(credentials_info)
-                
+            credentials = get_google_credentials()
+
+            if credentials:
                 self.speech_client = speech.SpeechClient(credentials=credentials)
                 self.tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
                 print("✅ Google Cloud clients initialized with base64 credentials")
@@ -66,15 +62,15 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
 
     async def _handle_auth(self, data):
         """Handle authentication"""
-        id_token = data.get("token", "")
-        user_id = verify_firebase_token(id_token)
-        
-        if not user_id:
+        access_token = data.get("token", "")
+        user = await database_sync_to_async(get_user_from_access_token)(access_token)
+
+        if not user:
             await self.send_json({"error": "Unauthorized"})
             await self.close()
             return
-            
-        self.user_id = user_id
+
+        self.user_id = user.id
         await self.send_json({"status": "authenticated"})
 
     async def _handle_audio_chunk(self, data):
@@ -106,14 +102,10 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
         response_data = build_response_data(gemini_result)
 
         try:
-            user_data = {"user_id": self.user_id, "text": transcript}
-            if game == "lol":
-                save_lol_analysis(user_data, gemini_result) 
-            else:
-                save_fifa_analysis(user_data, gemini_result) 
-            print(f"✅ Saved {game} analysis to Firestore")
+            await database_sync_to_async(save_analysis)(self.user_id, transcript, gemini_result, game)
+            print(f"✅ Saved {game} analysis to database")
         except Exception as e:
-            print(f"❌ Firestore Save Error: {e}")
+            print(f"❌ Database Save Error: {e}")
 
         tts_audio_b64 = None
         try:
