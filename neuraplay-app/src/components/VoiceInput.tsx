@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Mic, Square, Ear, EarOff, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import api, { API_BASE } from "../services/api";
+import { wakeWordListener } from "../services/wakeWordListener";
 
 type GameType = "fifa" | "lol";
 
@@ -12,19 +13,27 @@ interface Props {
 
 // Game-specific wake phrases
 const FIFA_WAKE_PHRASES = [
-  "hey fifa", "fifa", "fee fa", "vyfa", "vifa", "ea fc", "ea football", "hey ea"
+  "hey fifa", "fifa", "fee fa", "vyfa", "vifa", "fiver", "ea fc", "ea football", "hey ea"
 ];
 
 const LOL_WAKE_PHRASES = [
-  "hey lol", "lol", "league", "league of legends", "lowl", "hey league", "hey legends"
+  "hey lol", "lol", "league", "league of legends", "lowl", "lawl", "hey league", "hey legends", "legends"
 ];
+
+// Tiny silent WAV used to unlock audio playback during a user gesture (needed on iOS)
+const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+
+// Give up waiting for the server after this long
+const RESPONSE_TIMEOUT_MS = 90000;
+
+let nextInstanceId = 1;
 
 // Platform detection utilities
 const getPlatformType = (): 'mobile' | 'desktop' | 'tablet' => {
   const userAgent = navigator.userAgent.toLowerCase();
   const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
   const isTablet = /ipad|tablet|(android(?!.*mobile))|(windows(?!.*phone)(.*touch))|kindle|playbook|silk|(puffin(?!.*(IP|AP|WP)))/i.test(userAgent);
-  
+
   if (isMobile) return 'mobile';
   if (isTablet) return 'tablet';
   return 'desktop';
@@ -51,6 +60,14 @@ const getBrowserType = (): 'chrome' | 'firefox' | 'safari' | 'edge' | 'other' =>
 const supportsSpeechSynthesis = (): boolean => {
   return 'speechSynthesis' in window;
 };
+
+const blobToBase64 = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 
 // Levenshtein distance utility
 function levenshteinDistance(a: string, b: string): number {
@@ -89,23 +106,35 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
   const [transcript, setTranscript] = useState<string>("");
   const [status, setStatus] = useState<string>("Initializing...");
   const [micPermission, setMicPermission] = useState<"granted" | "denied" | "prompt">("prompt");
+  const [micReady, setMicReady] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [enableTTS, setEnableTTS] = useState(true);
 
   // Refs
+  const instanceId = useRef(nextInstanceId++).current;
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
+  const chunkSendQueue = useRef<Promise<void>>(Promise.resolve());
+  const sendOnStop = useRef(false);
   const mainRec = useRef<any | null>(null);
-  const wakeRec = useRef<any | null>(null);
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const restartWakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const responseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalBuffer = useRef<string>("");
-  const processingWake = useRef(false);
-  const wakeBackoff = useRef<number>(500);
-  const isInitialized = useRef(false);
   const ws = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioEl = useRef<HTMLAudioElement | null>(null);
+  const audioUnlocked = useRef(false);
+
+  // Live values for callbacks that outlive a render (recognizers, sockets, timers)
+  const gameRef = useRef(game);
+  const listeningRef = useRef(false);
+  const wakeActiveRef = useRef(wakeActive);
+  const enableTTSRef = useRef(enableTTS);
+  const awaitingResponse = useRef(false);
+  gameRef.current = game;
+  wakeActiveRef.current = wakeActive;
+  enableTTSRef.current = enableTTS;
 
   // Platform-specific configuration
   const platformType = getPlatformType();
@@ -125,7 +154,8 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
     isIOS: isApple,
     browser: browserType,
     supportsTTS: supportsTTS,
-    
+    supportsRecognition: wakeWordListener.isSupported,
+
     // Platform-specific settings
     getAudioConstraints: () => {
       if (platformType === 'mobile') {
@@ -146,7 +176,7 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
           };
         }
       }
-      
+
       return {
         audio: {
           sampleRate: 16000,
@@ -157,19 +187,19 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
         }
       };
     },
-    
+
     getRecordingInterval: () => {
       return platformType === 'mobile' ? 250 : 100;
     },
-    
+
     getSilenceTimeout: () => {
       return platformType === 'mobile' ? 6000 : 4000;
     },
-    
+
     getWakeSimilarityThreshold: () => {
       return platformType === 'mobile' ? 0.55 : 0.65;
     },
-    
+
     getMimeType: (): string => {
       if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
         return 'audio/webm;codecs=opus';
@@ -180,19 +210,15 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
       }
       return '';
     },
-    
-    shouldUseContinuousRecording: () => {
-      return platformType === 'desktop';
-    },
+  };
 
-    // TTS fallback strategy
-    shouldUseClientTTS: () => {
-      return platformType === 'mobile' || !enableTTS;
-    }
+  const updateListening = (value: boolean) => {
+    listeningRef.current = value;
+    setListening(value);
   };
 
   const getCurrentWakePhrases = (): string[] => {
-    return game === "fifa" ? FIFA_WAKE_PHRASES : LOL_WAKE_PHRASES;
+    return gameRef.current === "fifa" ? FIFA_WAKE_PHRASES : LOL_WAKE_PHRASES;
   };
 
   const getWakeStatusMessage = (): string => {
@@ -201,52 +227,53 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
     return `Say '${mainPhrase}'`;
   };
 
+  const getIdleStatus = (): string => {
+    if (shouldUseHTTP) return "Ready - Press mic to speak";
+    return wakeActiveRef.current ? getWakeStatusMessage() : "Ready";
+  };
+
   const getPlatformInfo = (): string => {
     return `${platformType}-${browserType}`;
   };
 
-  // HTTP Processing for Mobile/Tablet
-  const processVoiceViaHTTP = async (audioBlob: Blob): Promise<void> => {
-    setStatus("Processing...");
-    
-    try {
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-      formData.append('game', game);
+  // ----------------------
+  // Audio output
+  // ----------------------
+  const getAudioElement = (): HTMLAudioElement => {
+    if (!audioEl.current) audioEl.current = new Audio();
+    return audioEl.current;
+  };
 
-      console.log(`📤 Sending audio via HTTP: ${audioBlob.size} bytes`);
+  // Must run inside a user gesture; afterwards the same element may play without one
+  const unlockAudio = () => {
+    if (audioUnlocked.current) return;
+    const el = getAudioElement();
+    el.src = SILENT_WAV;
+    el.play()
+      .then(() => {
+        el.pause();
+        audioUnlocked.current = true;
+      })
+      .catch(() => {});
 
-      const { data } = await api.post('/api/process-voice-input/', formData);
-      
-      if (data.transcript) {
-        console.log(`✅ Transcript received: "${data.transcript}"`);
-        setTranscript(data.transcript);
-      }
-
-      if (data.analysis) {
-        console.log("✅ Analysis received:", data.analysis);
-        onAnalysis?.(data.analysis);
-        setStatus("Analysis received");
-        
-        // Handle TTS
-        if (data.tts_audio && enableTTS) {
-          setStatus("Playing response...");
-          try {
-            await playBase64Audio(data.tts_audio);
-            setStatus("Response complete");
-          } catch (ttsError) {
-            console.warn("TTS playback failed:", ttsError);
-            setStatus("Analysis complete");
-          }
-        } else {
-          setStatus("Analysis complete");
-        }
-      }
-
-    } catch (error) {
-      console.error("❌ HTTP processing failed:", error);
-      setStatus("Processing failed - try again");
+    if (platformConfig.supportsTTS) {
+      window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
     }
+  };
+
+  const stopPlayback = () => {
+    audioEl.current?.pause();
+    if (platformConfig.supportsTTS) window.speechSynthesis.cancel();
+  };
+
+  const playBase64Audio = (base64Data: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const el = getAudioElement();
+      el.onended = () => resolve();
+      el.onerror = () => reject(new Error("Audio playback failed"));
+      el.src = base64Data.startsWith('data:') ? base64Data : `data:audio/mpeg;base64,${base64Data}`;
+      el.play().catch(reject);
+    });
   };
 
   // Client-side TTS as fallback
@@ -260,14 +287,14 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
       window.speechSynthesis.cancel();
 
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.8;
+      utterance.rate = 0.9;
       utterance.pitch = 1;
       utterance.volume = 1;
 
       const ttsTimeout = setTimeout(() => {
         window.speechSynthesis.cancel();
         reject(new Error('TTS timeout'));
-      }, 10000);
+      }, Math.max(10000, text.length * 120));
 
       utterance.onend = () => {
         clearTimeout(ttsTimeout);
@@ -283,6 +310,97 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
     });
   };
 
+  // Server audio first; fall back to the browser's voice if it is missing or blocked
+  const speakResponse = async (data: any) => {
+    if (!enableTTSRef.current) return;
+
+    if (data.tts_audio) {
+      setStatus("Playing response...");
+      try {
+        await playBase64Audio(data.tts_audio);
+        return;
+      } catch (err) {
+        console.warn("Server audio playback failed, using browser voice:", err);
+      }
+    }
+
+    const text = data.analysis?.summary;
+    if (text && platformConfig.supportsTTS) {
+      setStatus("Speaking response...");
+      try {
+        await speakText(text);
+      } catch (err) {
+        console.warn("Browser voice failed:", err);
+      }
+    }
+  };
+
+  // ----------------------
+  // Response lifecycle
+  // ----------------------
+  const beginAwaitingResponse = () => {
+    awaitingResponse.current = true;
+    if (responseTimer.current) clearTimeout(responseTimer.current);
+    responseTimer.current = setTimeout(() => {
+      console.warn("No response from server in time");
+      finishResponse("No response - try again");
+    }, RESPONSE_TIMEOUT_MS);
+  };
+
+  const finishResponse = (finalStatus?: string) => {
+    awaitingResponse.current = false;
+    if (responseTimer.current) {
+      clearTimeout(responseTimer.current);
+      responseTimer.current = null;
+    }
+    wakeWordListener.resume(instanceId);
+    setStatus(finalStatus || getIdleStatus());
+  };
+
+  const handleServerResult = async (data: any) => {
+    if (data.transcript) {
+      setTranscript(data.transcript);
+      setStatus("Analyzing...");
+    }
+
+    if (data.analysis) {
+      console.log("✅ Analysis received:", data.analysis);
+      onAnalysis?.(data.analysis);
+      setStatus("Analysis received");
+      await speakResponse(data);
+      finishResponse();
+      return;
+    }
+
+    if (data.error && !data.error.includes('TTS failed')) {
+      finishResponse("Error: " + data.error);
+    }
+  };
+
+  // HTTP Processing for Mobile/Tablet
+  const processVoiceViaHTTP = async (audioBlob: Blob): Promise<void> => {
+    setStatus("Processing...");
+
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+      formData.append('game', gameRef.current);
+
+      console.log(`📤 Sending audio via HTTP: ${audioBlob.size} bytes`);
+
+      const { data } = await api.post('/api/process-voice-input/', formData);
+      await handleServerResult(data);
+      if (awaitingResponse.current) finishResponse();
+    } catch (error) {
+      console.error("❌ HTTP processing failed:", error);
+      finishResponse("Processing failed - try again");
+    }
+  };
+
+  // Latest handlers for long-lived callbacks
+  const messageHandlerRef = useRef(handleServerResult);
+  messageHandlerRef.current = handleServerResult;
+
   // WebSocket connection - ONLY for Desktop
   useEffect(() => {
     // Skip WebSocket setup if using HTTP (mobile/tablet)
@@ -294,154 +412,75 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
 
     if (!userToken) return;
 
-    const setupWebSocket = () => {
-      const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/voice-analysis/';
-      ws.current = new WebSocket(wsUrl);
+    let disposed = false;
+    let unauthorized = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-      ws.current.onopen = () => {
+    const connect = () => {
+      const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/voice-analysis/';
+      const socket = new WebSocket(wsUrl);
+      ws.current = socket;
+
+      socket.onopen = () => {
         console.log(`WebSocket connected on ${getPlatformInfo()}`);
-        setIsConnected(true);
-        ws.current?.send(JSON.stringify({ type: 'auth', token: userToken }));
-        setStatus("Ready");
+        socket.send(JSON.stringify({ type: 'auth', token: userToken }));
       };
 
-      ws.current.onmessage = async (event) => {
+      socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log('WebSocket message:', data);
 
         if (data.status === 'authenticated') {
-          setStatus("Ready");
+          setIsConnected(true);
+          if (!listeningRef.current && !awaitingResponse.current) setStatus(getIdleStatus());
+          return;
         }
 
-        if (data.transcript) {
-          setTranscript(data.transcript);
-          setStatus("Analyzing...");
+        if (data.error === 'Unauthorized') {
+          unauthorized = true;
+          setStatus("Session expired - log in again");
+          return;
         }
 
-        if (data.analysis) {
-          console.log("Analysis received:", data.analysis);
-          onAnalysis?.(data.analysis);
-          setStatus("Analysis received");
-
-          // Handle TTS with fallback strategy
-          await handleTTSResponse(data);
-        }
-
-        if (data.error && !data.error.includes('TTS failed')) {
-          setStatus("Error: " + data.error);
-        }
+        messageHandlerRef.current(data);
       };
 
-      ws.current.onclose = (event) => {
+      socket.onclose = (event) => {
         console.log(`WebSocket disconnected on ${getPlatformInfo()}:`, event.code, event.reason);
-        setIsConnected(false);
-        setStatus("Disconnected");
-        
-        if (!event.wasClean && userToken) {
-          setTimeout(() => {
-            setupWebSocket();
-          }, 2000);
+        if (ws.current === socket) {
+          ws.current = null;
+          setIsConnected(false);
+        }
+        if (awaitingResponse.current) finishResponse("Connection lost - try again");
+
+        if (!disposed && !unauthorized) {
+          setStatus("Reconnecting...");
+          reconnectTimer = setTimeout(connect, 2000);
         }
       };
 
-      ws.current.onerror = (error) => {
+      socket.onerror = (error) => {
         console.error('WebSocket error:', error);
-        setStatus("Connection error");
       };
     };
 
-    const handleTTSResponse = async (data: any) => {
-      const analysisText = data.analysis?.summary || "Analysis complete.";
-      
-      if (data.tts_audio && enableTTS) {
-        setStatus("Playing response...");
-        try {
-          await playBase64Audio(data.tts_audio);
-          setStatus("Response complete");
-          restartWakeEngine();
-          return;
-        } catch (serverTtsError) {
-          console.warn("Server TTS failed, trying fallback:", serverTtsError);
-        }
-      }
-
-      if (platformConfig.supportsTTS && platformConfig.shouldUseClientTTS()) {
-        setStatus("Generating voice response...");
-        try {
-          await speakText(analysisText);
-          setStatus("Response complete");
-          restartWakeEngine();
-          return;
-        } catch (clientTtsError) {
-          console.warn("Client TTS also failed:", clientTtsError);
-        }
-      }
-
-      setStatus("Analysis complete");
-      restartWakeEngine();
-    };
-
-    const restartWakeEngine = () => {
-      if (wakeActive && !listening) {
-        setTimeout(() => {
-          setStatus(getWakeStatusMessage());
-          startWakeEngine();
-        }, platformConfig.isMobile ? 800 : 500);
-      }
-    };
-
-    setupWebSocket();
+    connect();
 
     return () => {
-      if (ws.current) {
-        ws.current.close();
-      }
-      if (platformConfig.supportsTTS) {
-        window.speechSynthesis.cancel();
-      }
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws.current?.close();
+      ws.current = null;
+      setIsConnected(false);
     };
-  }, [userToken, onAnalysis, enableTTS, shouldUseHTTP]);
+  }, [userToken, shouldUseHTTP]);
 
-  const playBase64Audio = (base64Data: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      try {
-        const dataUri = base64Data.startsWith('data:') ? base64Data : `data:audio/mpeg;base64,${base64Data}`;
-        const audio = new Audio(dataUri);
-        
-        audio.onended = () => {
-          console.log("Audio playback finished");
-          resolve();
-        };
-        
-        audio.onerror = (e) => {
-          console.error("Audio playback error:", e);
-          reject(new Error("Audio playback failed"));
-        };
-
-        const playPromise = audio.play();
-        if (playPromise) {
-          playPromise.catch(err => {
-            console.warn("Audio play blocked:", err);
-            resolve();
-          });
-        }
-      } catch (err) {
-        reject(err);
-      }
-    });
-  };
-
-  const initializeMicrophone = async (): Promise<boolean> => {
+  // ----------------------
+  // Microphone and recording
+  // ----------------------
+  const acquireMicrophone = async (): Promise<MediaStream | null> => {
     try {
-      setStatus("Requesting microphone...");
-      
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
-
       const constraints = platformConfig.getAudioConstraints();
-      
       console.log(`Initializing microphone for ${getPlatformInfo()} with constraints:`, constraints);
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
@@ -449,95 +488,99 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
           console.warn("Primary constraints failed, trying fallback:", err);
           return await navigator.mediaDevices.getUserMedia({ audio: true });
         });
-      
-      streamRef.current = stream;
+
       setMicPermission("granted");
-      setStatus("Microphone ready");
-      
-      const mimeType = platformConfig.getMimeType();
-      const testRecorder = mimeType 
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-      
-      return new Promise((resolve) => {
-        testRecorder.onstart = () => {
-          testRecorder.stop();
-          resolve(true);
-        };
-        testRecorder.onerror = () => {
-          console.warn("Test recorder failed, but continuing anyway");
-          resolve(true);
-        };
-        testRecorder.start();
-        setTimeout(() => {
-          try { testRecorder.stop(); } catch {}
-          resolve(true);
-        }, 100);
-      });
-      
+      return stream;
     } catch (err) {
       console.error("Microphone initialization failed:", err);
       setMicPermission("denied");
       setStatus("Microphone access denied");
-      return false;
+      return null;
+    }
+  };
+
+  const releaseMicrophone = () => {
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+  };
+
+  const initializeMicrophone = async (): Promise<boolean> => {
+    setStatus("Requesting microphone...");
+    releaseMicrophone();
+    const stream = await acquireMicrophone();
+    streamRef.current = stream;
+    setMicReady(Boolean(stream));
+    return Boolean(stream);
+  };
+
+  const hasLiveStream = (): boolean =>
+    Boolean(streamRef.current?.getAudioTracks().some(track => track.readyState === 'live'));
+
+  const sendWs = (payload: object) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify(payload));
     }
   };
 
   const startAudioRecording = async (): Promise<boolean> => {
     try {
-      if (!streamRef.current) {
+      if (!hasLiveStream()) {
         const initialized = await initializeMicrophone();
         if (!initialized) return false;
       }
 
-      if (!streamRef.current) {
-        setStatus("Microphone not available");
-        return false;
-      }
-
       audioChunks.current = [];
-      
+      chunkSendQueue.current = Promise.resolve();
+      sendOnStop.current = false;
+
       const mimeType = platformConfig.getMimeType();
-      
-      mediaRecorder.current = mimeType 
-        ? new MediaRecorder(streamRef.current, { mimeType })
-        : new MediaRecorder(streamRef.current);
-      
-      mediaRecorder.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunks.current.push(event.data);
-          
-          // Only send to WebSocket if in WebSocket mode (desktop)
-          if (!shouldUseHTTP && ws.current?.readyState === WebSocket.OPEN) {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const base64 = (reader.result as string).split(',')[1];
-              (ws.current as any).send(JSON.stringify({
-                type: 'audio_chunk',
-                audio_base64: base64
-              }));
-            };
-            reader.readAsDataURL(event.data);
-          }
+      const recorder = mimeType
+        ? new MediaRecorder(streamRef.current!, { mimeType })
+        : new MediaRecorder(streamRef.current!);
+      mediaRecorder.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size === 0) return;
+        audioChunks.current.push(event.data);
+
+        // Desktop streams chunks over the WebSocket, in order
+        if (!shouldUseHTTP) {
+          const chunk = event.data;
+          chunkSendQueue.current = chunkSendQueue.current
+            .then(() => blobToBase64(chunk))
+            .then((audio_base64) => sendWs({ type: 'audio_chunk', audio_base64 }))
+            .catch((err) => console.warn("Failed to send audio chunk:", err));
         }
       };
 
-      // Handle HTTP processing when recording stops (mobile/tablet)
-      mediaRecorder.current.onstop = async () => {
-        if (shouldUseHTTP && audioChunks.current.length > 0) {
-          const audioBlob = new Blob(audioChunks.current, { 
-            type: mediaRecorder.current?.mimeType || 'audio/webm' 
-          });
-          await processVoiceViaHTTP(audioBlob);
+      // The final chunk is delivered just before stop, so signal the server only after it is sent
+      recorder.onstop = async () => {
+        const send = sendOnStop.current;
+
+        if (shouldUseHTTP) {
+          if (send && audioChunks.current.length > 0) {
+            const audioBlob = new Blob(audioChunks.current, { type: recorder.mimeType || 'audio/webm' });
+            await processVoiceViaHTTP(audioBlob);
+          } else if (send) {
+            finishResponse("No audio recorded - try again");
+          }
+          return;
+        }
+
+        await chunkSendQueue.current;
+        if (send) {
+          sendWs({ type: 'speech_end', game: gameRef.current });
+        } else {
+          sendWs({ type: 'speech_cancel' });
         }
       };
-      
+
       const interval = platformConfig.getRecordingInterval();
-      mediaRecorder.current.start(interval);
-      
+      recorder.start(interval);
+
       console.log(`Started recording with ${interval}ms interval on ${getPlatformInfo()}`);
       return true;
-      
+
     } catch (err) {
       console.error("Audio recording failed:", err);
       setStatus("Recording failed");
@@ -545,17 +588,10 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
     }
   };
 
-  const stopAudioRecording = () => {
+  const stopAudioRecording = (send: boolean) => {
+    sendOnStop.current = send;
     if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
       mediaRecorder.current.stop();
-      
-      // Only send speech_end to WebSocket if in WebSocket mode (desktop)
-      if (!shouldUseHTTP && ws.current?.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({
-          type: 'speech_end',
-          game: game
-        }));
-      }
     }
   };
 
@@ -574,37 +610,36 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
       clearTimeout(silenceTimer.current);
       silenceTimer.current = null;
     }
-    
+
     const timeout = platformConfig.getSilenceTimeout();
     silenceTimer.current = setTimeout(() => {
-      const finalText = finalBuffer.current.trim();
-      stopMainRecognition(Boolean(finalText));
+      stopMainRecognition(true);
     }, timeout);
   };
 
   const startMainRecognition = async () => {
-    if (listening) return;
-    
+    if (listeningRef.current || awaitingResponse.current) return;
+
+    stopPlayback();
+    wakeWordListener.pause(instanceId);
+
     // HTTP Mode (mobile/tablet): Simple recording
     if (shouldUseHTTP) {
       const recordingStarted = await startAudioRecording();
       if (!recordingStarted) {
-        setStatus("Failed to start recording");
+        finishResponse("Failed to start recording");
         return;
       }
-      setListening(true);
+      updateListening(true);
       setStatus("Recording... Speak now");
       return;
     }
 
-    // WebSocket Mode (desktop): Original flow with wake word
-    if (!isConnected) {
-      setStatus("Not connected");
+    // WebSocket Mode (desktop)
+    if (ws.current?.readyState !== WebSocket.OPEN) {
+      finishResponse("Not connected");
       return;
     }
-
-    safeStop(wakeRec.current);
-    wakeRec.current = null;
 
     finalBuffer.current = "";
     setTranscript("");
@@ -612,24 +647,20 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
 
     const recordingStarted = await startAudioRecording();
     if (!recordingStarted) {
-      setStatus("Failed to start");
+      finishResponse("Failed to start");
       return;
     }
 
-    setListening(true);
+    updateListening(true);
 
-    if ("webkitSpeechRecognition" in window || (window as any).SpeechRecognition) {
+    if (platformConfig.supportsRecognition) {
       const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
       const rec = new SpeechRecognition();
       mainRec.current = rec;
 
-      rec.continuous = platformConfig.shouldUseContinuousRecording();
+      rec.continuous = true;
       rec.interimResults = true;
       rec.lang = "en-US";
-
-      if (platformConfig.isMobile) {
-        rec.continuous = true;
-      }
 
       rec.onresult = (ev: any) => {
         let interim = "";
@@ -657,9 +688,7 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
       };
 
       rec.onend = () => {
-        if (!platformConfig.isMobile || !listening) {
-          stopMainRecognition(true);
-        }
+        if (listeningRef.current) stopMainRecognition(true);
       };
 
       try {
@@ -670,14 +699,15 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
         setStatus("Recording...");
       }
     } else {
-      setStatus("Recording...");
+      setStatus("Recording... press stop when done");
     }
   };
 
   const stopMainRecognition = (sendData: boolean) => {
+    if (!listeningRef.current) return;
+
     safeStop(mainRec.current);
     mainRec.current = null;
-    stopAudioRecording();
 
     if (silenceTimer.current) {
       clearTimeout(silenceTimer.current);
@@ -686,159 +716,54 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
 
     const text = finalBuffer.current.trim();
     finalBuffer.current = "";
-    setListening(false);
+    updateListening(false);
 
-    if (!sendData || !text) {
-      if (wakeActive && !shouldUseHTTP) {
-        const restartDelay = platformConfig.isMobile ? 500 : 300;
-        setTimeout(() => startWakeEngine(), restartDelay);
-      } else {
-        setStatus("Ready");
-      }
+    // Without browser recognition we can't tell if anything was said, so let the server decide
+    const send = sendData && (shouldUseHTTP || Boolean(text) || !platformConfig.supportsRecognition);
+
+    if (send) {
+      beginAwaitingResponse();
+      setStatus("Processing...");
+    }
+    stopAudioRecording(send);
+
+    if (!send) {
+      finishResponse(sendData ? "Didn't catch that - try again" : undefined);
     }
   };
 
+  // Whole-word matching so e.g. "league" or "yeah" never trigger the FIFA panel
   const detectWakeIntent = (textRaw: string): boolean => {
     if (!textRaw) return false;
-    const text = textRaw.toLowerCase().trim();
+    const text = textRaw.toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+    if (!text) return false;
 
-    const currentPhrases = getCurrentWakePhrases();
-    
     const similarityThreshold = platformConfig.getWakeSimilarityThreshold();
-    
-    for (const phrase of currentPhrases) {
-      if (similarity(text, phrase) >= similarityThreshold) return true;
-      
-      if (platformConfig.isMobile) {
-        const words = text.split(' ');
-        const phraseWords = phrase.split(' ');
-        
-        if (phraseWords.some(word => words.includes(word))) {
-          return true;
-        }
-        
-        if (game === "fifa") {
-          if (text.includes("fifa") || text.includes("fee fa") || text.includes("vyfa") || text.includes("vifa") || text.includes("fiver")) {
-            return true;
-          }
-        }
-        if (game === "lol") {
-          if (text.includes("lol") || text.includes("lowl") || text.includes("lole") || text.includes("lawl")) {
-            return true;
-          }
-        }
-      }
-    }
-    
-    if (game === "fifa" && (text.includes("fifa") || text.includes("ea") || text.includes("fc"))) {
-      return true;
-    }
-    if (game === "lol" && (text.includes("lol") || text.includes("league") || text.includes("legends"))) {
-      return true;
-    }
-    
-    return false;
+
+    return getCurrentWakePhrases().some((phrase) =>
+      new RegExp(`\\b${phrase}\\b`).test(text) || similarity(text, phrase) >= similarityThreshold
+    );
   };
 
-  const startWakeEngine = () => {
-    // No wake word for HTTP mode (mobile/tablet)
-    if (shouldUseHTTP) return;
-    
-    if (wakeRec.current || listening || !isConnected) return;
-    if (!("webkitSpeechRecognition" in window || (window as any).SpeechRecognition)) {
-      setStatus("Wake not supported");
-      return;
-    }
-    if (micPermission === "denied") {
-      setStatus("Microphone denied");
-      return;
-    }
+  const wakeHandlersRef = useRef({ detectWakeIntent, startMainRecognition });
+  wakeHandlersRef.current = { detectWakeIntent, startMainRecognition };
 
-    try {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      const rec = new SpeechRecognition();
-      wakeRec.current = rec;
+  // Shared wake-word listener (desktop only)
+  useEffect(() => {
+    if (shouldUseHTTP || !wakeActive || !isConnected || !micReady) return;
 
-      rec.continuous = true;
-      rec.interimResults = false;
-      rec.lang = "en-US";
-      rec.maxAlternatives = 1;
-
-      if (platformConfig.isMobile) {
-        rec.continuous = true;
-      }
-
-      rec.onresult = (ev: any) => {
-        if (processingWake.current || listening) return;
-        const last = ev.results[ev.results.length - 1];
-        const text = last && last[0] && last[0].transcript ? String(last[0].transcript).toLowerCase() : "";
-        if (!text) return;
-        
-        const isWakeCommand = detectWakeIntent(text);
-        if (!isWakeCommand) return;
-
-        processingWake.current = true;
-        safeStop(rec);
-        wakeRec.current = null;
-
+    wakeWordListener.subscribe(
+      instanceId,
+      (text) => wakeHandlersRef.current.detectWakeIntent(text),
+      () => {
         setStatus("Wake detected");
-
-        const processingDelay = platformConfig.isMobile ? 400 : 300;
-        setTimeout(() => {
-          processingWake.current = false;
-          startMainRecognition();
-        }, processingDelay);
-      };
-
-      rec.onerror = (ev: any) => {
-        console.warn("Wake engine error:", ev?.error);
-        safeStop(rec);
-        wakeRec.current = null;
-
-        if (ev?.error === "not-allowed") {
-          setMicPermission("denied");
-          setWakeActive(false);
-          setStatus("Mic denied");
-          return;
-        }
-
-        const baseBackoff = platformConfig.isMobile ? 800 : 500;
-        const backoff = Math.min(wakeBackoff.current, baseBackoff * 2);
-        restartWakeTimer.current = setTimeout(() => {
-          wakeBackoff.current = Math.min(baseBackoff * 2, wakeBackoff.current * 1.5);
-          if (wakeActive && !listening) startWakeEngine();
-        }, backoff);
-      };
-
-      rec.onend = () => {
-        wakeRec.current = null;
-        if (wakeActive && !listening) {
-          const backoff = Math.min(wakeBackoff.current, platformConfig.isMobile ? 1000 : 500);
-          restartWakeTimer.current = setTimeout(() => {
-            if (wakeActive && !listening) startWakeEngine();
-          }, backoff);
-        }
-      };
-
-      rec.start();
-      setStatus(getWakeStatusMessage());
-      wakeBackoff.current = platformConfig.isMobile ? 800 : 500;
-    } catch (err) {
-      console.error("Failed to start wake engine:", err);
-      setStatus("Wake failed");
-      wakeRec.current = null;
-      if (wakeActive && !listening) {
-        const retryDelay = platformConfig.isMobile ? 1500 : 1200;
-        restartWakeTimer.current = setTimeout(() => startWakeEngine(), retryDelay);
+        wakeHandlersRef.current.startMainRecognition();
       }
-    }
-  };
+    );
+    if (!listeningRef.current && !awaitingResponse.current) setStatus(getWakeStatusMessage());
 
-  const stopWakeEngine = () => {
-    safeStop(wakeRec.current);
-    wakeRec.current = null;
-    setStatus("Wake disabled");
-  };
+    return () => wakeWordListener.unsubscribe(instanceId);
+  }, [wakeActive, isConnected, micReady, shouldUseHTTP]);
 
   const toggleWake = () => {
     // No wake word for HTTP mode (mobile/tablet)
@@ -846,37 +771,33 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
       setStatus("Wake word not available on mobile");
       return;
     }
-    
+
+    unlockAudio();
     if (wakeActive) {
       setWakeActive(false);
-      stopWakeEngine();
       setStatus("Wake disabled");
     } else {
       setWakeActive(true);
-      startWakeEngine();
       setStatus(getWakeStatusMessage());
     }
   };
 
   const toggleTTS = () => {
+    unlockAudio();
+    if (enableTTS) stopPlayback();
     setEnableTTS(!enableTTS);
     setStatus(enableTTS ? "Voice responses disabled" : "Voice responses enabled");
   };
 
   const handleGameSwitch = (newGame: GameType) => {
     setGame(newGame);
-    if (wakeActive && !listening && !shouldUseHTTP) {
-      safeStop(wakeRec.current);
-      const switchDelay = platformConfig.isMobile ? 400 : 300;
-      setTimeout(() => {
-        setStatus(getWakeStatusMessage());
-        startWakeEngine();
-      }, switchDelay);
-    }
+    gameRef.current = newGame;
+    if (!listeningRef.current && !awaitingResponse.current) setStatus(getIdleStatus());
   };
 
   const handleMicClick = () => {
-    if (listening) {
+    unlockAudio();
+    if (listeningRef.current) {
       stopMainRecognition(true);
     } else {
       startMainRecognition();
@@ -885,46 +806,33 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
 
   const handleTouchStart = (e: React.TouchEvent) => {
     e.preventDefault();
-    if (!listening) {
+    unlockAudio();
+    if (!listeningRef.current) {
       startMainRecognition();
     }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     e.preventDefault();
-    if (listening) {
+    if (listeningRef.current) {
       stopMainRecognition(true);
     }
   };
 
   const handleResetMicrophone = async () => {
+    unlockAudio();
     setStatus("Resetting...");
-    
+
     safeStop(mainRec.current);
-    safeStop(wakeRec.current);
-    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-      mediaRecorder.current.stop();
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    
-    setListening(false);
+    mainRec.current = null;
+    stopAudioRecording(false);
+    stopPlayback();
+    updateListening(false);
     setTranscript("");
     finalBuffer.current = "";
-    
+
     await initializeMicrophone();
-    
-    if (wakeActive && !listening && !shouldUseHTTP) {
-      const resetDelay = platformConfig.isMobile ? 800 : 500;
-      setTimeout(() => {
-        setStatus(getWakeStatusMessage());
-        startWakeEngine();
-      }, resetDelay);
-    } else {
-      setStatus("Ready");
-    }
+    finishResponse();
   };
 
   const clearTranscript = () => {
@@ -932,64 +840,55 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
     finalBuffer.current = "";
   };
 
+  // Microphone setup on mount, full teardown on unmount
   useEffect(() => {
-    const initialize = async () => {
-      if (isInitialized.current) return;
-      isInitialized.current = true;
-      setIsInitializing(true);
+    let cancelled = false;
 
-      setStatus("Initializing...");
-      
-      await initializeMicrophone();
-      
-      // HTTP Mode (mobile/tablet): Simple ready status
-      if (shouldUseHTTP) {
-        setStatus("Ready - Press mic to speak");
-        setIsInitializing(false);
+    const initialize = async () => {
+      setIsInitializing(true);
+      setStatus("Requesting microphone...");
+
+      const stream = await acquireMicrophone();
+      if (cancelled) {
+        stream?.getTracks().forEach(track => track.stop());
         return;
       }
-      
-      // WebSocket Mode (desktop): Use wake engine
-      if (isConnected && wakeActive && micPermission === "granted") {
-        setStatus("Starting wake...");
-        const initDelay = platformConfig.isMobile ? 600 : 400;
-        setTimeout(() => {
-          startWakeEngine();
-        }, initDelay);
-      } else if (micPermission === "denied") {
+
+      streamRef.current = stream;
+      setMicReady(Boolean(stream));
+      if (!stream) {
         setStatus("Microphone required");
         setWakeActive(false);
+      } else {
+        setStatus(shouldUseHTTP ? "Ready - Press mic to speak" : "Connecting...");
       }
-      
       setIsInitializing(false);
     };
 
-    if (isConnected || shouldUseHTTP) {
-      initialize();
-    }
+    initialize();
+
+    // Any first interaction unlocks audio so wake-word responses can play aloud
+    const unlockOnGesture = () => unlockAudio();
+    document.addEventListener('pointerdown', unlockOnGesture, { once: true });
+    document.addEventListener('keydown', unlockOnGesture, { once: true });
 
     return () => {
+      cancelled = true;
+      document.removeEventListener('pointerdown', unlockOnGesture);
+      document.removeEventListener('keydown', unlockOnGesture);
       safeStop(mainRec.current);
-      safeStop(wakeRec.current);
+      wakeWordListener.unsubscribe(instanceId);
       if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+        mediaRecorder.current.onstop = null;
         mediaRecorder.current.stop();
       }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
+      releaseMicrophone();
       if (silenceTimer.current) clearTimeout(silenceTimer.current);
-      if (restartWakeTimer.current) clearTimeout(restartWakeTimer.current);
-      if (platformConfig.supportsTTS) {
-        window.speechSynthesis.cancel();
-      }
+      if (responseTimer.current) clearTimeout(responseTimer.current);
+      stopPlayback();
     };
-  }, [isConnected, shouldUseHTTP]);
-
-  useEffect(() => {
-    if (wakeActive && !listening && !shouldUseHTTP) {
-      setStatus(getWakeStatusMessage());
-    }
-  }, [game, shouldUseHTTP]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="p-3 sm:p-4 bg-gray-900 rounded-xl text-white max-w-xl">
@@ -998,7 +897,7 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
         <div className="flex items-center gap-2">
           <div className="text-sm font-medium">Game: <span className="text-purple-400 uppercase">{game}</span></div>
           <div className="text-xs text-gray-400">
-            {status} {shouldUseHTTP ? "📱 HTTP" : (isConnected ? "🟢" : "🔴")} 
+            {status} {shouldUseHTTP ? "📱 HTTP" : (isConnected ? "🟢" : "🔴")}
             <span className="ml-1 text-gray-500">({getPlatformInfo()})</span>
           </div>
         </div>
@@ -1017,10 +916,9 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
 
           <button
             onClick={toggleTTS}
-            disabled={!platformConfig.supportsTTS}
             className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${
               enableTTS ? "bg-green-600 hover:bg-green-700" : "bg-gray-700 hover:bg-gray-600"
-            } ${!platformConfig.supportsTTS ? "opacity-50 cursor-not-allowed" : ""}`}
+            }`}
             title={enableTTS ? "Disable voice responses" : "Enable voice responses"}
           >
             {enableTTS ? <Volume2 size={12} /> : <VolumeX size={12} />}
@@ -1029,10 +927,10 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
 
           <button
             onClick={toggleWake}
-            disabled={micPermission === "denied" || !isConnected || isInitializing || shouldUseHTTP}
+            disabled={micPermission === "denied" || !isConnected || isInitializing || shouldUseHTTP || !platformConfig.supportsRecognition}
             className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${
               wakeActive ? "bg-green-600 hover:bg-green-700" : "bg-gray-700 hover:bg-gray-600"
-            } ${(micPermission === "denied" || !isConnected || isInitializing || shouldUseHTTP) ? "opacity-50 cursor-not-allowed" : ""}`}
+            } ${(micPermission === "denied" || !isConnected || isInitializing || shouldUseHTTP || !platformConfig.supportsRecognition) ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             {wakeActive ? <Ear size={12} /> : <EarOff size={12} />}
             {wakeActive ? "Wake On" : "Wake Off"}
@@ -1078,7 +976,7 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
           </div>
 
           {/* Action Buttons */}
-          {transcript && !shouldUseHTTP && (
+          {transcript && listening && !shouldUseHTTP && (
             <div className="flex flex-col sm:flex-row gap-2 mt-2">
               <button
                 onClick={() => stopMainRecognition(true)}
@@ -1126,7 +1024,7 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
         )}
         {!platformConfig.supportsTTS && (
           <div className="mt-2 text-yellow-200">
-            ⓘ Voice responses not supported on this browser
+            ⓘ Browser voice not supported - server voice only
           </div>
         )}
       </div>
@@ -1135,4 +1033,3 @@ const VoiceInput: React.FC<Props> = ({ userToken, initialGame = "fifa", onAnalys
 };
 
 export default VoiceInput;
-
