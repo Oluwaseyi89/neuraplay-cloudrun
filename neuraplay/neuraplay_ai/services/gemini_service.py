@@ -71,6 +71,12 @@ def _score_to_rating(score: float) -> float:
     score_clamped = max(0.0, min(1.0, score))
     return round(1.0 + score_clamped * 9.0, 1)
 
+_LIST_MARKER = re.compile(r"^(?:[-•*]+|\d+\.)\s*")
+
+def _strip_list_marker(line: str) -> str:
+    """Remove a leading bullet or "1." marker without eating digits in the text itself."""
+    return _LIST_MARKER.sub("", line, count=1).strip()
+
 def _parse_insights_to_structured(text: str) -> Dict[str, Any]:
     """
     Very small heuristic parser that tries to split the AI text into:
@@ -89,10 +95,14 @@ def _parse_insights_to_structured(text: str) -> Dict[str, Any]:
     for line in lines:
         lowered = line.lower()
         if lowered.startswith(("tip", "-", "•", "1.", "2.", "3.")):
+            item = _strip_list_marker(line)
+            # Bare markers and Markdown dividers ("-", "3.", "---") carry no content
+            if not item:
+                continue
             if "drill" in lowered or "practice" in lowered or "train" in lowered:
-                drills.append(line.lstrip("-•0123456789. ").strip())
+                drills.append(item)
             else:
-                top_tips.append(line.lstrip("-•0123456789. ").strip())
+                top_tips.append(item)
         elif "score" in lowered or "%" in lowered:
             m = re.search(r"(\d{1,3})(?:\.\d+)?\s*%?", line)
             if m:
@@ -106,8 +116,9 @@ def _parse_insights_to_structured(text: str) -> Dict[str, Any]:
             explanation_parts.append(line)
 
     if not top_tips:
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        top_tips = [s.strip() for s in sentences[:3] if s.strip()]
+        # Use the cleaned lines, not the raw text, so dividers and bare markers don't leak in
+        sentences = re.split(r'(?<=[.!?])\s+', " ".join(explanation_parts))
+        top_tips = [s.strip() for s in sentences if s.strip()][:3]
 
     if not drills:
         drills = []
