@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 import os
 
 
@@ -34,7 +35,7 @@ except ImportError:
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = os.environ.get('DJANGO_DEBUG', 'false').lower() == 'true'
 
 ALLOWED_HOSTS = [
     "localhost",
@@ -76,6 +77,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
+    'authentication.apps.AuthenticationConfig',
     'analysis.apps.AnalysisConfig',
     'corsheaders',
     'channels'
@@ -141,9 +145,44 @@ CHANNEL_LAYERS = {
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('POSTGRES_DB', 'neuraplay_db'),
+        'USER': os.environ.get('POSTGRES_USER', 'neura_play_user'),
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
+        'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+        'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+        'CONN_MAX_AGE': int(os.environ.get('POSTGRES_CONN_MAX_AGE', 60)),
     }
+}
+
+
+# Authentication
+# Users are stored in the database and authenticated with JWTs (SimpleJWT)
+
+AUTH_USER_MODEL = 'authentication.User'
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'auth': os.environ.get('AUTH_THROTTLE_RATE', '20/minute'),
+    },
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.environ.get('JWT_ACCESS_TOKEN_MINUTES', 30))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.environ.get('JWT_REFRESH_TOKEN_DAYS', 7))),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
 
@@ -193,7 +232,7 @@ CELERY_BEAT_SCHEDULE = {
 # ... your existing imports and base config ...
 
 # Determine environment
-IS_PRODUCTION = True #os.environ.get('PRODUCTION', 'false').lower() == 'true'
+IS_PRODUCTION = os.environ.get('PRODUCTION', 'false').lower() == 'true'
 
 # Security settings for production
 if IS_PRODUCTION:
@@ -207,9 +246,8 @@ if IS_PRODUCTION:
     # Use environment variable for Redis in production
     REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 else:
-    DEBUG = True
     # ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
-    REDIS_URL = 'redis://localhost:6379/0'
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
 # Celery Configuration for production
 CELERY_BROKER_URL = REDIS_URL
