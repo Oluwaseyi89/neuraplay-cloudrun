@@ -37,6 +37,7 @@ def url_debug(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path("api/auth/", include("authentication.urls")),
     path("api/", include("analysis.urls")),
     # path('debug/urls/', url_debug),  
 ]
