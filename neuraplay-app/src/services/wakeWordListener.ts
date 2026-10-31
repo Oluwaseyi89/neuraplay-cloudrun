@@ -1,33 +1,12 @@
+import { getRecognitionCtor } from "../lib/speechRecognition";
+import type { Recognition } from "../lib/speechRecognition";
+
 type Matcher = (transcript: string) => boolean;
 
 interface Subscriber {
   matches: Matcher;
   onWake: () => void;
 }
-
-// Minimal Web Speech API types (not yet in TypeScript's DOM lib)
-interface RecognitionResultEvent {
-  results: ArrayLike<ArrayLike<{ transcript: string }>>;
-}
-
-interface Recognition {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  onresult: ((ev: RecognitionResultEvent) => void) | null;
-  onerror: ((ev: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  abort(): void;
-}
-
-type RecognitionCtor = new () => Recognition;
-
-const getRecognitionCtor = (): RecognitionCtor | undefined => {
-  const w = window as unknown as { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor };
-  return w.SpeechRecognition || w.webkitSpeechRecognition;
-};
 
 /**
  * Browsers allow only one active SpeechRecognition session per page, so every
@@ -154,3 +133,8 @@ class WakeWordListener {
 }
 
 export const wakeWordListener = new WakeWordListener();
+
+let nextSubscriberId = 1;
+
+/** Unique id for a component that subscribes to or pauses the listener */
+export const createSubscriberId = (): number => nextSubscriberId++;
