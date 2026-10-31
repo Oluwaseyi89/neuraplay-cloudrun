@@ -29,6 +29,7 @@ def save_analysis(user_id, user_text: str, analysis_result: Dict[str, Any], game
     print(f"✅ Saved {game} analysis with ID: {analysis.pk} (TTL: {ANALYSIS_TTL_HOURS} hours)")
 
     _enforce_analysis_limit(user_id, game)
+    delete_expired_analyses()
 
     return str(analysis.pk)
 
