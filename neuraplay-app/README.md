@@ -1,8 +1,8 @@
 # NeuraPlay React Frontend
 
-![React 18](https://img.shields.io/badge/React-18-blue)
+![React 19](https://img.shields.io/badge/React-19-blue)
 ![TypeScript 5.0](https://img.shields.io/badge/TypeScript-5.0-blue)
-![Firebase Auth](https://img.shields.io/badge/Firebase-Auth-orange)
+![JWT Auth](https://img.shields.io/badge/Auth-JWT-orange)
 ![Vite Build](https://img.shields.io/badge/Vite-Build-purple)
 
 ## 🎮 Overview
@@ -16,7 +16,7 @@ NeuraPlay Frontend is a modern React application that provides real-time AI game
 - 🔊 **Voice Responses** - Audio feedback with Text-to-Speech
 - 📊 **Analysis History** - Review past coaching sessions
 - 📱 **Responsive Design** - Optimized for desktop and mobile
-- 🔐 **Secure Authentication** - Firebase Auth integration
+- 🔐 **Secure Authentication** - Email/password accounts with JWT sessions
 - 🎨 **Modern UI** - Beautiful gradient design with smooth animations
 
 ## 🚀 Quick Start
@@ -24,8 +24,7 @@ NeuraPlay Frontend is a modern React application that provides real-time AI game
 ### Prerequisites
 
 - Node.js 22 or higher
-- Firebase project with Authentication enabled
-- NeuraPlay backend API
+- NeuraPlay backend API (see `../neuraplay`)
 
 
 ## Installation
@@ -44,17 +43,10 @@ NeuraPlay Frontend is a modern React application that provides real-time AI game
 
 ## Environment Configuration
 
-Edit `.env` file with your Firebase and API settings:
+Edit `.env` with the backend URL (the WebSocket URL is derived from it):
 
 ```env
-VITE_API_BASE_URL=your_backend_api_url
-VITE_FIREBASE_API_KEY=your_firebase_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_firebase_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_firebase_app_id
-VITE_FIREBASE_MEASUREMENT_ID=your_measurement_id
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ## Development
@@ -62,6 +54,10 @@ VITE_FIREBASE_MEASUREMENT_ID=your_measurement_id
 ```bash
   # Start development server
   npm run dev
+
+  # Unit tests (Vitest) and lint
+  npm test
+  npm run lint
 
   # Build for production
   npm run build
@@ -72,49 +68,51 @@ VITE_FIREBASE_MEASUREMENT_ID=your_measurement_id
 
 ## 🏗️ Project Structure
 
+Each layer has one job: `lib/` is pure logic, `services/` talks to the backend,
+`hooks/` own stateful behaviour, and `components/` only render.
+
 ```
-  neuraplay-app/
-  ├── src/
-  │   ├── components/          # React components
-  │   │   ├── LoginButton.tsx  # Firebase authentication
-  │   │   └── VoiceInput.tsx   # Voice recording & analysis
-  │   ├── firebase/           # Firebase configuration
-  │   │   └── firebaseClient.ts
-  │   ├── store/              # State management
-  │   │   └── auth-store.ts   # Authentication store
-  │   ├── App.tsx            # Main application component
-  │   └── main.tsx           # Application entry point
-  ├── public/                # Static assets
-  ├── package.json
-  ├── vite.config.ts        # Vite configuration
-  └── env.example           # Environment variables template
+  neuraplay-app/src/
+  ├── types/                  # Shared types and game metadata (labels, colours, icons)
+  ├── lib/                    # Pure, unit-tested helpers
+  │   ├── wakePhrases.ts      # Wake phrases + whole-word/fuzzy wake detection
+  │   ├── platform.ts         # Device/browser detection and voice settings per platform
+  │   ├── jwt.ts · errors.ts  # Token expiry, readable API error messages
+  │   └── audio.ts · speechRecognition.ts
+  ├── services/
+  │   ├── httpClient.ts       # Axios instance, auth header, refresh-and-retry on 401
+  │   ├── authService.ts      # register / login / logout / me
+  │   ├── analysisService.ts  # recent analyses, mobile voice upload
+  │   └── wakeWordListener.ts # One shared wake-word recognizer for all voice panels
+  ├── store/auth-store.ts     # Persisted user + tokens (Zustand)
+  ├── hooks/
+  │   ├── useAuthSession.ts   # Session validation, proactive token refresh, logout
+  │   ├── useRecentAnalyses.ts
+  │   ├── useVoiceAssistant.ts  # Orchestrates the voice flow below
+  │   ├── useMicrophone.ts · useAudioRecorder.ts · useLiveTranscription.ts
+  │   └── useAudioPlayback.ts · useVoiceSocket.ts
+  ├── components/
+  │   ├── auth/               # LoginForm, RegisterForm, form building blocks
+  │   ├── layout/             # AppHeader, TabSwitcher, MobileMenu, PageHeading
+  │   ├── analysis/           # AnalysisCard, AnalysisHistoryItem, GameSelector
+  │   └── voice/              # VoiceInput, VoiceToolbar, MicButton, TranscriptPanel, GamePanel
+  ├── pages/                  # AuthPage, DashboardPage, VoiceAnalysisPage, RecentAnalysesPage
+  ├── App.tsx                 # Chooses AuthPage or DashboardPage
+  └── main.tsx
 ```
 
-## 🎯 Core Components
+## 🎯 Voice Flow
 
-### App.tsx
-Main application component with:
-- Authentication flow with Firebase
-- Tab navigation between Voice Analysis and History
-- Real-time state management for analyses
-- Responsive design for mobile and desktop
-
-### VoiceInput Component
-- WebSocket integration for real-time voice processing
-- Audio recording with browser MediaRecorder API
-- Game selection (FIFA/LoL)
-- Analysis display with structured coaching data
-
-### Authentication
-- Firebase Auth integration
-- JWT token management for API calls
-- Protected routes and user session handling
-
+1. **Wake word (desktop):** `wakeWordListener` hears "hey FIFA" / "hey LoL" and wakes the matching panel.
+2. **Record:** `useMicrophone` + `useAudioRecorder` capture audio; `useLiveTranscription` shows a live transcript and detects silence.
+3. **Send:** desktop streams chunks over the WebSocket (`useVoiceSocket`); mobile/tablet uploads the recording over HTTP.
+4. **Respond:** the analysis is shown and `useAudioPlayback` plays the server's voice reply, falling back to the browser's voice.
 
 ## 🔌 API Integration
 
 ### Backend Endpoints
 
+- `POST /api/auth/register/` · `POST /api/auth/login/` · `POST /api/auth/token/refresh/` · `POST /api/auth/logout/` · `GET /api/auth/me/`
 - `POST /api/analyze/fifa/` - FIFA voice analysis
 - `POST /api/analyze/lol/` - League of Legends voice analysis
 - `POST /api/process-voice-input/` - Voice analysis endpoint for Mobile browsers
@@ -141,11 +139,12 @@ Main application component with:
 - **Desktop:** > 1024px - Full featured sidebar layout
 
 ## 🔧 Technical Stack
-- **Frontend Framework:** React 18 with TypeScript
+- **Frontend Framework:** React 19 with TypeScript
 - **Build Tool:** Vite for fast development and building
 - **Styling:** Tailwind CSS for utility-first styling
 - **State Management:** Zustand for lightweight state
-- **Authentication:** Firebase Auth
+- **Authentication:** Django + SimpleJWT (access/refresh tokens)
+- **Testing:** Vitest
 - **HTTP Client:** Axios for API requests
 - **Real-time:** WebSocket for voice processing
 
@@ -158,16 +157,10 @@ Main application component with:
 
 ## 🚀 Deployment
 
-### Build for Production
+The app builds to static files, so it can be hosted on Vercel or Netlify:
 
-```bash
-  npm run build
+- **Build command:** `npm run build`
+- **Output directory:** `dist`
+- **Environment variable:** `VITE_API_BASE_URL=https://<your-backend>.onrender.com`
 
-  docker build -t neuraplay-app .
-
-  gcloud run deploy neuraplay-app \
-    --source . \
-    --region us-central1 \
-    --platform managed \
-    --allow-unauthenticated
-```
+Add the deployed frontend URL to the backend's `CORS_ALLOWED_ORIGINS`.
