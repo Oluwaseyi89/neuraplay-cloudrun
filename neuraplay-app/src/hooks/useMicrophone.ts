@@ -46,8 +46,6 @@ export const useMicrophone = (constraints: MediaStreamConstraints) => {
     return (await reinitialize()) ? streamRef.current : null;
   }, [reinitialize]);
 
-  const markDenied = useCallback(() => setPermission("denied"), []);
-
   useEffect(() => {
     let cancelled = false;
 
@@ -67,5 +65,5 @@ export const useMicrophone = (constraints: MediaStreamConstraints) => {
     };
   }, [acquire, release]);
 
-  return { permission, ready, initializing, ensureStream, reinitialize, markDenied };
+  return { permission, ready, initializing, ensureStream, reinitialize };
 };
