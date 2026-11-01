@@ -4,7 +4,7 @@ import { detectWakeIntent, getWakePrompt, similarity } from "./wakePhrases";
 const DESKTOP_THRESHOLD = 0.65;
 
 describe("detectWakeIntent", () => {
-  it.each(["hey fifa", "Hey FIFA!", "okay fifa start", "ea fc"])("wakes the FIFA panel for %j", (heard) => {
+  it.each(["hey fifa", "Hey FIFA!", "okay fifa start", "ea fc", "Haifa", "hey fifa I keep losing the ball"])("wakes the FIFA panel for %j", (heard) => {
     expect(detectWakeIntent(heard, "fifa", DESKTOP_THRESHOLD)).toBe(true);
   });
 
