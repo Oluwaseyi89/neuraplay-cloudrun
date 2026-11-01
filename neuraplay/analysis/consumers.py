@@ -17,6 +17,18 @@ from quotas.http import quota_exceeded_payload
 from quotas.services import QuotaExceeded, consume_analysis_quota
 
 
+def transcription_problem(transcript: str):
+    """
+    _transcribe_audio reports failures as bracketed placeholders such as
+    "[No speech detected]". Returns an error payload for those, or None for real speech.
+    """
+    if transcript.strip() and not transcript.startswith("["):
+        return None
+    if "no speech" in transcript.lower():
+        return {"error": "No speech detected - please try again", "code": "no_speech"}
+    return {"error": "Couldn't transcribe your audio - please try again", "code": "transcription_failed"}
+
+
 class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -101,13 +113,20 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
             await self.send_json({"error": "No audio data received"})
             return
 
+        transcript = await self._transcribe_audio(audio_bytes)
+
+        # Silence or a failed transcription never reaches Gemini or uses quota
+        problem = transcription_problem(transcript)
+        if problem:
+            await self.send_json(problem)
+            return
+
         try:
             await database_sync_to_async(consume_analysis_quota)(user_id=self.user_id, ip=self.client_ip)
         except QuotaExceeded as exc:
             await self.send_json(quota_exceeded_payload(exc))
             return
 
-        transcript = await self._transcribe_audio(audio_bytes)
         await self.send_json({"transcript": transcript})
 
         try:

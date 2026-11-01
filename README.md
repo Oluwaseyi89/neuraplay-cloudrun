@@ -111,7 +111,7 @@ The extension's backend address is hard-coded in `background/background.js` and 
 ### Voice coaching (web app)
 1. **Sign up** or log in.
 2. **Desktop:** say "hey FIFA" or "hey LoL". **Mobile:** tap the mic.
-3. **Describe the problem**, e.g. "I keep conceding goals on the counter attack". Recording stops after a few seconds of silence.
+3. **Wait for "Listening..."**, then describe the problem, e.g. "I keep conceding goals on the counter attack". On desktop, recording stops about 2 seconds after you finish; on mobile, tap the mic again.
 4. **Read and hear the analysis.** Add "detailed" to your request for tips, drills and a rating.
 
 ### Recent analyses

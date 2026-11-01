@@ -14,7 +14,7 @@ The NeuraPlay web app is a voice-first coaching dashboard. Players sign up, say 
 - 🔐 **Accounts** - Email/password registration and login; sessions refresh automatically
 - 🗣️ **Wake word (desktop)** - Say "hey FIFA" or "hey LoL" to start recording hands-free
 - 🎤 **Tap to talk (mobile/tablet)** - Press the mic to record; recordings are uploaded over HTTP
-- 📝 **Live transcript** - See what you're saying while you speak; recording stops after a few seconds of silence
+- 📝 **Live transcript** - See what you're saying while you speak; on desktop, recording stops about 2 seconds after you finish (detected from the microphone's volume)
 - 🔊 **Spoken replies** - Plays the server's voice reply, falling back to the browser's own voice
 - 🎮 **Two games** - Separate FIFA/EA FC and League of Legends panels
 - 📊 **Recent analyses** - History per game, for the last 24 hours
@@ -95,7 +95,7 @@ Each layer has one job: `lib/` is pure logic, `services/` talks to the backend,
 ## 🎯 Voice Flow
 
 1. **Wake word (desktop):** `wakeWordListener` hears "hey FIFA" / "hey LoL" and wakes the matching panel. Browsers allow only one speech recognizer per page, so both panels share it.
-2. **Record:** `useMicrophone` + `useAudioRecorder` capture audio; `useLiveTranscription` shows a live transcript and stops after silence.
+2. **Record:** `useMicrophone` + `useAudioRecorder` capture audio. On desktop, `lib/voiceActivity.ts` watches the microphone volume and ends the recording about 2 seconds after you stop talking, or cancels it if nobody speaks within 8 seconds (45-second cap). `useLiveTranscription` only shows the live transcript and never ends the recording.
 3. **Send:** desktop streams chunks over the WebSocket (`useVoiceSocket`); mobile/tablet uploads the recording over HTTP.
 4. **Respond:** the analysis appears under the panel and `useAudioPlayback` plays the server's voice reply. Audio is unlocked on the first click or key press, because browsers block sound that starts without a user gesture.
 

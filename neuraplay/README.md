@@ -90,10 +90,10 @@ Desktop browsers stream audio over a WebSocket. All messages are JSON.
 |-----------------|---------|
 | `{"type": "auth", "token": "<access token>"}` | Authenticate (server replies `{"status": "authenticated"}` or `{"error": "Unauthorized"}` and closes) |
 | `{"type": "audio_chunk", "audio_base64": "..."}` | Append WebM/Opus audio to the buffer |
-| `{"type": "speech_end", "game": "fifa" \| "lol"}` | Transcribe the buffer, analyze it, and reply (counts toward the quota) |
+| `{"type": "speech_end", "game": "fifa" \| "lol"}` | Transcribe the buffer, analyze it, and reply (counts toward the quota once speech is transcribed) |
 | `{"type": "speech_cancel"}` | Discard the buffered audio |
 
-The server first sends `{"transcript": "..."}`, then `{"transcript", "analysis", "tts_audio"}` where `tts_audio` is base64 MP3. Errors arrive as `{"error": "..."}`; a reached limit adds `"code": "rate_limited"`.
+The server first sends `{"transcript": "..."}`, then `{"transcript", "analysis", "tts_audio"}` where `tts_audio` is base64 MP3. Errors arrive as `{"error": "..."}` with an optional `code`: `rate_limited` (daily limit reached), `no_speech` (silence) or `transcription_failed`.
 
 ## 🛡️ Limits & Data Retention
 
@@ -108,6 +108,7 @@ Details:
 - Counters live in PostgreSQL (`quotas.DailyUsage`), so they survive restarts.
 - A request rejected by one limit doesn't use up the other.
 - Invalid requests (no text, no audio, unsupported game) don't count.
+- Voice requests count only once speech has been transcribed, so silence or a failed transcription never uses quota or reaches Gemini.
 - Over the limit, HTTP returns `429` with a `Retry-After` header and `{"error", "code": "rate_limited", "scope", "limit", "retry_after"}`.
 - IP addresses are stored only as keyed hashes.
 - To reset someone's quota, delete their row under **Daily usage** in the Django admin.
