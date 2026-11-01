@@ -201,13 +201,37 @@ async def test_websocket_rejects_speech_over_the_limit(limits):
     user = await sync_to_async(User.objects.create_user)(email="ws@example.com", username="ws", password="Str0ng-Passw0rd!")
 
     communicator = await _connect_authenticated(user)
-    with patch.object(VoiceAnalysisConsumer, "_transcribe_audio") as transcribe:
+    with patch.object(VoiceAnalysisConsumer, "_transcribe_audio", return_value="I keep losing the ball"), \
+         patch("analysis.consumers.analyze_fifa_voice_input") as gemini:
         await communicator.send_json_to({"type": "audio_chunk", "audio_base64": "AAAA"})
         await communicator.send_json_to({"type": "speech_end", "game": "fifa"})
         response = await communicator.receive_json_from()
 
     assert response["code"] == "rate_limited"
-    transcribe.assert_not_called()
+    gemini.assert_not_called()
+    await communicator.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("transcript, code", [
+    ("[No speech detected]", "no_speech"),
+    ("[Transcription error: bad audio]", "transcription_failed"),
+])
+async def test_websocket_silence_skips_gemini_and_quota(limits, transcript, code):
+    from asgiref.sync import sync_to_async
+    user = await sync_to_async(User.objects.create_user)(email="quiet@example.com", username="quiet", password="Str0ng-Passw0rd!")
+
+    communicator = await _connect_authenticated(user)
+    with patch.object(VoiceAnalysisConsumer, "_transcribe_audio", return_value=transcript), \
+         patch("analysis.consumers.analyze_fifa_voice_input") as gemini:
+        await communicator.send_json_to({"type": "audio_chunk", "audio_base64": "AAAA"})
+        await communicator.send_json_to({"type": "speech_end", "game": "fifa"})
+        response = await communicator.receive_json_from()
+
+    assert response["code"] == code
+    gemini.assert_not_called()
+    assert not await sync_to_async(DailyUsage.objects.exists)()
     await communicator.disconnect()
 
 
@@ -223,3 +247,20 @@ async def test_websocket_empty_speech_does_not_use_quota(limits):
     assert await communicator.receive_json_from() == {"error": "No audio data received"}
     assert not await sync_to_async(DailyUsage.objects.exists)()
     await communicator.disconnect()
+
+
+@patch("analysis.views.analyze_fifa_voice_input", return_value=GEMINI_RESULT)
+@patch("analysis.views.transcribe_audio")
+def test_mobile_upload_with_no_speech_does_not_use_quota(mock_transcribe, mock_gemini, make_user, limits):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    mock_transcribe.return_value.results = []
+    client = APIClient()
+    client.force_authenticate(user=make_user("alice"))
+
+    audio = SimpleUploadedFile("recording.webm", b"\x1a\x45\xdf\xa3 not really audio", content_type="audio/webm")
+    response = client.post("/api/process-voice-input/", {"audio": audio, "game": "fifa"}, format="multipart")
+
+    assert response.status_code == 200
+    assert response.data["transcript"] == "[No speech detected]"
+    mock_gemini.assert_not_called()
+    assert not DailyUsage.objects.exists()
