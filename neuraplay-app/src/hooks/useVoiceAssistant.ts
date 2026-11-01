@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { detectPlatform } from "../lib/platform";
 import { blobToBase64 } from "../lib/audio";
 import { detectWakeIntent, getWakePrompt } from "../lib/wakePhrases";
+import { getErrorMessage } from "../lib/errors";
 import { analysisService } from "../services/analysisService";
 import { createSubscriberId, wakeWordListener } from "../services/wakeWordListener";
 import { useMicrophone } from "./useMicrophone";
@@ -121,7 +122,8 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
       if (awaitingResponse.current) finishResponse();
     } catch (error) {
       console.error("❌ HTTP processing failed:", error);
-      finishResponse("Processing failed - try again");
+      // Shows the server's reason, e.g. the daily limit and when it resets
+      finishResponse(getErrorMessage(error, "Processing failed - try again"));
     }
   };
 
