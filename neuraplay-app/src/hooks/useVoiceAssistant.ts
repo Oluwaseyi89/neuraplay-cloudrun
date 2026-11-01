@@ -15,6 +15,8 @@ import type { GameType } from "../types/game";
 
 // Give up waiting for the server after this long
 const RESPONSE_TIMEOUT_MS = 90000;
+// Chrome needs a moment to release the wake listener's session before another can start
+const WAKE_TO_LISTEN_DELAY_MS = 300;
 
 interface Options {
   token: string;
@@ -254,7 +256,7 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
       (heard) => detectWakeIntent(heard, gameRef.current, platform.wakeSimilarityThreshold),
       () => {
         setStatus("Wake detected");
-        wakeHandlersRef.current.startListening();
+        setTimeout(() => wakeHandlersRef.current.startListening(), WAKE_TO_LISTEN_DELAY_MS);
       }
     );
     if (isIdle()) setStatus(getWakePrompt(gameRef.current));
