@@ -211,9 +211,6 @@ def process_voice_input(request):
         if not audio_content or len(audio_content) == 0:
             return Response({"error": "No audio data received"}, status=400)
 
-        if (limited := enforce_analysis_quota(request)) is not None:
-            return limited
-
         response = transcribe_audio(audio_content)
         
         if not response.results:
@@ -231,6 +228,10 @@ def process_voice_input(request):
         
         transcript = " ".join([result.alternatives[0].transcript for result in response.results])
         print(f"✅ HTTP Transcription successful: '{transcript}'")
+
+        # Counted only once real speech is transcribed; silence above costs nothing
+        if (limited := enforce_analysis_quota(request)) is not None:
+            return limited
 
         if game == "lol":
             gemini_result = analyze_lol_voice_input(transcript)
