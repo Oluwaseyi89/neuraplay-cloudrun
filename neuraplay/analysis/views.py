@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from neuraplay_ai.services.gemini_service import analyze_fifa_voice_input, analyze_lol_voice_input
 from neuraplay_ai.services.analysis_service import save_analysis, get_recent_analyses
+from quotas.http import enforce_analysis_quota
 
 _google_clients = {}
 _google_lock = threading.Lock()
@@ -209,7 +210,10 @@ def process_voice_input(request):
         
         if not audio_content or len(audio_content) == 0:
             return Response({"error": "No audio data received"}, status=400)
-        
+
+        if (limited := enforce_analysis_quota(request)) is not None:
+            return limited
+
         response = transcribe_audio(audio_content)
         
         if not response.results:
@@ -272,6 +276,9 @@ def analyze_fifa_voice(request):
     if not user_text:
         return Response({"error": "No text provided"}, status=400)
 
+    if (limited := enforce_analysis_quota(request)) is not None:
+        return limited
+
     try:
         result = analyze_fifa_voice_input(user_text)
         print("✅ FIFA Voice Analysis Result:", result)
@@ -294,6 +301,9 @@ def analyze_lol_voice(request):
     user_text = request.data.get("stats")
     if not user_text:
         return Response({"error": "No text provided"}, status=400)
+
+    if (limited := enforce_analysis_quota(request)) is not None:
+        return limited
 
     try:
         result = analyze_lol_voice_input(user_text)
@@ -362,18 +372,22 @@ def analyze_browser_stats(request):
     Analyze game stats from browser extension
     Reuses your existing analysis logic!
     """
+    game = request.data.get('game')
+    if game not in ('lol', 'fifa'):
+        return Response({"error": "Unsupported game"}, status=400)
+
+    # Anonymous endpoint: limited per IP address
+    if (limited := enforce_analysis_quota(request)) is not None:
+        return limited
+
     try:
-        game = request.data.get('game')
         stats_data = request.data.get('stats', {})
-        
         stats_text = _format_stats_for_analysis(stats_data, game)
-        
+
         if game == 'lol':
             result = analyze_lol_voice_input(stats_text)
-        elif game == 'fifa':
-            result = analyze_fifa_voice_input(stats_text)
         else:
-            return Response({"error": "Unsupported game"}, status=400)
+            result = analyze_fifa_voice_input(stats_text)
         
         response_data = build_response_data(result)
         

@@ -35,6 +35,12 @@ def env_list(name: str, default: str = '') -> list:
     return [item.strip() for item in os.environ.get(name, default).split(',') if item.strip()]
 
 
+def env_optional_int(name: str, default: int):
+    """Integer setting; an empty value means "not set" (None)"""
+    value = os.environ.get(name, str(default)).strip()
+    return int(value) if value else None
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -66,6 +72,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'authentication.apps.AuthenticationConfig',
     'analysis.apps.AnalysisConfig',
+    'quotas.apps.QuotasConfig',
     'corsheaders',
     'channels'
 ]
@@ -206,6 +213,18 @@ SIMPLE_JWT = {
     'UPDATE_LAST_LOGIN': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
+
+
+# Analysis limits
+# Daily request limits reset at midnight UTC; set a limit to 0 to block, or leave
+# the variable empty to disable that limit. Analyses expire ANALYSIS_TTL_HOURS after creation.
+
+ANALYSIS_DAILY_LIMIT_PER_USER = env_optional_int('ANALYSIS_DAILY_LIMIT_PER_USER', 3)
+ANALYSIS_DAILY_LIMIT_PER_IP = env_optional_int('ANALYSIS_DAILY_LIMIT_PER_IP', 5)
+ANALYSIS_TTL_HOURS = int(os.environ.get('ANALYSIS_TTL_HOURS', 24))
+
+# Proxies in front of the app that append to X-Forwarded-For (Render: 1, local: 0)
+TRUSTED_PROXY_COUNT = int(os.environ.get('TRUSTED_PROXY_COUNT', 0))
 
 
 # Password validation

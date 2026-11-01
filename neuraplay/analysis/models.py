@@ -1,5 +1,16 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
+
+
+class AnalysisQuerySet(models.QuerySet):
+    """Single definition of the TTL: an analysis is gone once expire_at has passed"""
+
+    def active(self):
+        return self.filter(expire_at__gt=timezone.now())
+
+    def expired(self):
+        return self.filter(expire_at__lte=timezone.now())
 
 
 class Analysis(models.Model):
@@ -25,6 +36,8 @@ class Analysis(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     expire_at = models.DateTimeField(db_index=True)
+
+    objects = AnalysisQuerySet.as_manager()
 
     class Meta:
         ordering = ["-created_at"]

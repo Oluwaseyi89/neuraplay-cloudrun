@@ -9,6 +9,7 @@ from analysis.models import Analysis
 from neuraplay_ai.services.analysis_service import (
     MAX_ANALYSES_PER_GAME,
     delete_expired_analyses,
+    delete_expired_analyses_for_user,
     get_recent_analyses,
     save_analysis,
 )
@@ -84,3 +85,33 @@ def test_recent_analyses_endpoint_is_scoped_to_user(user):
 
     assert response.status_code == 200
     assert [a["user_text"] for a in response.data["analyses"]] == ["mine"]
+
+
+def test_ttl_comes_from_settings(user, settings):
+    settings.ANALYSIS_TTL_HOURS = 1
+    analysis_id = save_analysis(user.id, "short lived", GEMINI_RESULT, "fifa")
+
+    analysis = Analysis.objects.get(pk=analysis_id)
+    assert analysis.expire_at <= timezone.now() + timedelta(hours=1)
+
+
+def test_reading_history_deletes_only_that_users_expired_analyses(user):
+    other = User.objects.create_user(email="other@example.com", username="other", password="Str0ng-Passw0rd!")
+    mine = save_analysis(user.id, "mine", GEMINI_RESULT, "lol")
+    theirs = save_analysis(other.id, "theirs", GEMINI_RESULT, "lol")
+    Analysis.objects.filter(pk__in=[mine, theirs]).update(expire_at=timezone.now() - timedelta(minutes=1))
+
+    get_recent_analyses(user.id, "lol")
+
+    assert not Analysis.objects.filter(pk=mine).exists()
+    assert Analysis.objects.filter(pk=theirs).exists()
+
+
+def test_active_and_expired_querysets(user):
+    fresh = save_analysis(user.id, "fresh", GEMINI_RESULT, "fifa")
+    stale = save_analysis(user.id, "stale", GEMINI_RESULT, "fifa")
+    Analysis.objects.filter(pk=stale).update(expire_at=timezone.now() - timedelta(seconds=1))
+
+    assert list(Analysis.objects.active().values_list("pk", flat=True)) == [int(fresh)]
+    assert list(Analysis.objects.expired().values_list("pk", flat=True)) == [int(stale)]
+    assert delete_expired_analyses_for_user(user.id) == 1

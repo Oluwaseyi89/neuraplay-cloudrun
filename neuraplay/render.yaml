@@ -23,6 +23,15 @@ services:
       # Frontend origin(s) on Vercel/Netlify, comma separated
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      # Render's proxy appends the client address to X-Forwarded-For
+      - key: TRUSTED_PROXY_COUNT
+        value: "1"
+      - key: ANALYSIS_DAILY_LIMIT_PER_USER
+        value: "3"
+      - key: ANALYSIS_DAILY_LIMIT_PER_IP
+        value: "5"
+      - key: ANALYSIS_TTL_HOURS
+        value: "24"
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
