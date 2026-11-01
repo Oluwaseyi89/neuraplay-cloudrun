@@ -12,6 +12,9 @@ from neuraplay_ai.services.gemini_service import analyze_fifa_voice_input, analy
 from neuraplay_ai.services.analysis_service import save_analysis
 from analysis.views import build_response_data, get_google_credentials
 from authentication.tokens import get_user_from_access_token
+from quotas.client_ip import client_ip_from_scope
+from quotas.http import quota_exceeded_payload
+from quotas.services import QuotaExceeded, consume_analysis_quota
 
 
 class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
@@ -47,6 +50,7 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
             self.tts_client = None
 
     async def connect(self):
+        self.client_ip = client_ip_from_scope(self.scope)
         await self.accept()
 
     async def receive(self, text_data=None, bytes_data=None):
@@ -92,6 +96,16 @@ class VoiceAnalysisConsumer(AsyncWebsocketConsumer):
         # Take the buffer up front so a failure below can't leak audio into the next utterance
         audio_bytes = self.buffered_audio
         self.buffered_audio = b""
+
+        if not audio_bytes:
+            await self.send_json({"error": "No audio data received"})
+            return
+
+        try:
+            await database_sync_to_async(consume_analysis_quota)(user_id=self.user_id, ip=self.client_ip)
+        except QuotaExceeded as exc:
+            await self.send_json(quota_exceeded_payload(exc))
+            return
 
         transcript = await self._transcribe_audio(audio_bytes)
         await self.send_json({"transcript": transcript})
