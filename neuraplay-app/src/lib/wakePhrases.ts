@@ -1,7 +1,8 @@
 import type { GameType } from "../types/game";
 
 export const WAKE_PHRASES: Record<GameType, string[]> = {
-  fifa: ["hey fifa", "fifa", "fee fa", "vyfa", "vifa", "fiver", "ea fc", "ea football", "hey ea"],
+  // "haifa" is a common speech-recognition spelling of "hey fifa"
+  fifa: ["hey fifa", "fifa", "haifa", "fee fa", "vyfa", "vifa", "fiver", "ea fc", "ea football", "hey ea"],
   lol: ["hey lol", "lol", "league", "league of legends", "lowl", "lawl", "hey league", "hey legends", "legends"],
 };
 
