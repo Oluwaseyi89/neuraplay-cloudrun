@@ -32,7 +32,14 @@ export interface PlatformConfig {
   supportsRecognition: boolean;
   audioConstraints: MediaStreamConstraints;
   recordingIntervalMs: number;
+  /** Fallback when volume-based detection is unavailable: stop after this long without new transcript */
   silenceTimeoutMs: number;
+  /** Pause after speech that ends a recording */
+  speechEndSilenceMs: number;
+  /** Cancel a recording if nobody starts talking within this long */
+  noSpeechTimeoutMs: number;
+  /** Hard cap on one recording */
+  maxRecordingMs: number;
   wakeSimilarityThreshold: number;
 }
 
@@ -73,6 +80,9 @@ export const detectPlatform = (userAgent = navigator.userAgent): PlatformConfig 
     audioConstraints: getAudioConstraints(type, userAgent),
     recordingIntervalMs: isMobile ? 250 : 100,
     silenceTimeoutMs: isMobile ? 6000 : 4000,
+    speechEndSilenceMs: 2000,
+    noSpeechTimeoutMs: 8000,
+    maxRecordingMs: 45000,
     wakeSimilarityThreshold: isMobile ? 0.55 : 0.65,
   };
 };
