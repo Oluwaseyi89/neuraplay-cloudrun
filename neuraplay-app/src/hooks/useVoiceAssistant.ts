@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { detectPlatform } from "../lib/platform";
 import { blobToBase64 } from "../lib/audio";
+import { monitorVoiceActivity } from "../lib/voiceActivity";
+import type { VoiceActivityMonitor } from "../lib/voiceActivity";
 import { detectWakeIntent, getWakePrompt } from "../lib/wakePhrases";
 import { getErrorMessage } from "../lib/errors";
 import { analysisService } from "../services/analysisService";
@@ -47,6 +49,8 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
   const awaitingResponse = useRef(false);
   const responseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxRecordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceActivity = useRef<VoiceActivityMonitor | null>(null);
   gameRef.current = game;
   wakeActiveRef.current = wakeActive;
   enableTTSRef.current = enableTTS;
@@ -70,6 +74,13 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
     if (silenceTimer.current) {
       clearTimeout(silenceTimer.current);
       silenceTimer.current = null;
+    }
+  };
+
+  const clearMaxRecordingTimer = () => {
+    if (maxRecordingTimer.current) {
+      clearTimeout(maxRecordingTimer.current);
+      maxRecordingTimer.current = null;
     }
   };
 
@@ -165,22 +176,14 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
     },
   });
 
+  // Live transcript only; recording length is decided by voice activity detection
   const transcription = useLiveTranscription({
     onUpdate: (display) => {
       setTranscript(display);
-      resetSilenceTimer();
+      // Fallback when volume-based detection isn't available
+      if (!voiceActivity.current) resetSilenceTimer();
     },
-    onError: (error) => {
-      console.warn("Main rec error:", error);
-      if (error === "not-allowed") {
-        mic.markDenied();
-        setStatus("Microphone denied");
-      }
-      stopListening(false);
-    },
-    onEnd: () => {
-      if (listeningRef.current) stopListening(true);
-    },
+    onBlocked: () => console.warn("Live transcript unavailable: speech recognition was not allowed"),
   });
 
   // ----------------------
@@ -211,25 +214,58 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
       return;
     }
     updateListening(true);
+    maxRecordingTimer.current = setTimeout(() => stopListening(true), platform.maxRecordingMs);
 
     if (platform.useHttp) {
       setStatus("Recording... Speak now");
-    } else if (platform.supportsRecognition && transcription.start()) {
+      return;
+    }
+
+    const transcriptStarted = platform.supportsRecognition && transcription.start();
+    const monitor = await monitorVoiceActivity(
+      stream,
+      { silenceMs: platform.speechEndSilenceMs, noSpeechMs: platform.noSpeechTimeoutMs },
+      (event) => {
+        if (event === "speech-ended") {
+          stopListening(true);
+        } else {
+          stopListening(false, "Didn't hear anything - try again");
+        }
+      }
+    );
+
+    // Recording may have been stopped while the detector was starting
+    if (!listeningRef.current) {
+      monitor?.stop();
+      return;
+    }
+    voiceActivity.current = monitor;
+
+    if (monitor) {
+      setStatus("Listening... pause when you're done");
+    } else if (transcriptStarted) {
       setStatus("Listening...");
     } else {
       setStatus("Recording... press stop when done");
     }
   };
 
-  const stopListening = (sendData: boolean) => {
+  const stopListening = (sendData: boolean, cancelStatus?: string) => {
     if (!listeningRef.current) return;
 
     const text = transcription.stop();
+    const monitor = voiceActivity.current;
+    voiceActivity.current = null;
+    const heardSpeech = monitor?.hasSpoken() ?? false;
+    monitor?.stop();
     clearSilenceTimer();
+    clearMaxRecordingTimer();
     updateListening(false);
 
-    // Without browser recognition we can't tell if anything was said, so let the server decide
-    const send = sendData && (platform.useHttp || Boolean(text) || !platform.supportsRecognition);
+    // Send if speech was heard by volume or by the live transcript; the server's
+    // Speech-to-Text does the real transcription. With no way to tell, let the server decide.
+    const canTell = Boolean(monitor) || platform.supportsRecognition;
+    const send = sendData && (platform.useHttp || heardSpeech || Boolean(text) || !canTell);
 
     if (send) {
       beginAwaitingResponse();
@@ -238,7 +274,7 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
     recorder.stop(send);
 
     if (!send) {
-      finishResponse(sendData ? "Didn't catch that - try again" : undefined);
+      finishResponse(sendData ? "Didn't catch that - try again" : cancelStatus);
     }
   };
 
@@ -280,6 +316,8 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
 
   useEffect(() => () => {
     wakeWordListener.unsubscribe(subscriberId);
+    voiceActivity.current?.stop();
+    if (maxRecordingTimer.current) clearTimeout(maxRecordingTimer.current);
     if (silenceTimer.current) clearTimeout(silenceTimer.current);
     if (responseTimer.current) clearTimeout(responseTimer.current);
   }, [subscriberId]);
@@ -336,11 +374,9 @@ export const useVoiceAssistant = ({ token, initialGame, onAnalysis }: Options) =
     playback.unlock();
     setStatus("Resetting...");
 
-    transcription.stop();
-    clearSilenceTimer();
-    if (listeningRef.current) recorder.stop(false);
+    // Cancels any recording in progress (transcript, voice detection, timers, recorder)
+    stopListening(false, "Resetting...");
     playback.stop();
-    updateListening(false);
     setTranscript("");
 
     await mic.reinitialize();
