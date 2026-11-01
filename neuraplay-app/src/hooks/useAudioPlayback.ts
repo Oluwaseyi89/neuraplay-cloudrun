@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { SILENT_WAV, toAudioDataUri } from "../lib/audio";
+import { resumeAudioContext } from "../lib/audioContext";
 import type { VoiceResult } from "../types/analysis";
 
 /** Plays spoken responses: server audio first, the browser's own voice as fallback */
@@ -14,6 +15,8 @@ export const useAudioPlayback = (supportsTTS: boolean) => {
 
   /** Must run inside a user gesture; afterwards the same element may play without one */
   const unlock = useCallback(() => {
+    // Also start Web Audio, which voice activity detection needs
+    resumeAudioContext();
     if (unlocked.current) return;
     const el = getAudioElement();
     el.src = SILENT_WAV;
