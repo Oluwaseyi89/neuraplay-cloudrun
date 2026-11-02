@@ -1,0 +1,34 @@
+# Secrets: supply them at runtime (docker run --env-file / platform env vars), never bake them in
+.env
+.env.*
+!.env.example
+secrets/
+*.json.key
+
+# Local environments, caches and generated files
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+staticfiles/
+db.sqlite3
+celerybeat-schedule
+
+# Tests and dev-only files
+**/tests/
+**/tests.py
+test_gemini.py
+pytest.ini
+requirements-dev.txt
+
+# Not needed inside the image
+.git
+.gitignore
+.dockerignore
+Dockerfile
+render.yaml
+*.md
+.idea/
+.vscode/

@@ -1,0 +1,5 @@
+# Development and test tools (not installed in the production image)
+-r requirements.txt
+pytest
+pytest-django
+pytest-asyncio

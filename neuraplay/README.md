@@ -167,7 +167,7 @@ See `.env.example` for a template.
     # Virtual environment and dependencies
     python -m venv venv
     source venv/bin/activate  # Windows: venv\Scripts\activate
-    pip install -r requirements.txt
+    pip install -r requirements-dev.txt   # app + test tools (production uses requirements.txt)
 
     # Database (CREATEDB lets the test suite create its test database)
     sudo -u postgres psql -c "CREATE USER neura_play_user WITH PASSWORD '<password>' CREATEDB;"
@@ -206,4 +206,20 @@ The tests need the Postgres user to have `CREATEDB`, and `GEMINI_API_KEY` set (a
    - generates `DJANGO_SECRET_KEY` and sets `TRUSTED_PROXY_COUNT=1` and the daily limits.
 3. In Render, set the secret values the blueprint leaves blank: `DATABASE_URL`, `GEMINI_API_KEY`, `GOOGLE_CLOUD_CREDENTIALS_BASE64`, and `CORS_ALLOWED_ORIGINS` (the frontend's URL).
 
-The `Dockerfile` is kept for container-based hosting; Render's Python runtime doesn't use it.
+## 🐳 Docker
+
+Render's Python runtime doesn't need it, but the `Dockerfile` builds a production image for any container host:
+
+```bash
+    docker build -t neuraplay-backend .
+    docker run --env-file .env -p 8000:8000 neuraplay-backend
+```
+
+- **Secrets stay out of the image:** `.dockerignore` excludes `.env`; pass configuration at runtime (`--env-file`, or the platform's environment variables).
+- **Non-root:** the app runs as an unprivileged `app` user (uid 10001) that can't modify the code or installed packages.
+- **Multi-stage:** dependencies are installed in a builder stage with the compiler toolchain; the runtime image contains only the virtualenv and app code (no compilers, tests or test tools), about half the size of a single-stage build.
+- **Built ahead of time:** static files are collected and Python bytecode compiled during the build; dependencies are cached in their own layer, so code-only changes rebuild quickly.
+- **Health check:** Docker's `HEALTHCHECK` calls `/api/health/` (keep `127.0.0.1` in `ALLOWED_HOSTS` if you override it).
+- Listens on `$PORT` (default 8000); `start.sh` runs migrations and then Daphne.
+
+To connect to a Postgres running on the host machine, add `--network host` on Linux (or use `host.docker.internal` as `POSTGRES_HOST` elsewhere).

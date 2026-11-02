@@ -80,7 +80,7 @@ Each part has its own README with details: [backend](neuraplay/README.md), [web 
 
     python -m venv venv
     source venv/bin/activate  # Windows: venv\Scripts\activate
-    pip install -r requirements.txt
+    pip install -r requirements-dev.txt
 
     # Create a Postgres user (with CREATEDB, for tests) and database, then fill in
     # DJANGO_SECRET_KEY, POSTGRES_PASSWORD, GEMINI_API_KEY and DJANGO_DEBUG=true
