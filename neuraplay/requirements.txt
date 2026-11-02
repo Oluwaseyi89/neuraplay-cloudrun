@@ -1,8 +1,6 @@
 Django>=5.2,<5.3
 python-dotenv
 google-genai
-pytest
-pytest-django
 djangorestframework
 djangorestframework-simplejwt
 google-cloud-texttospeech
